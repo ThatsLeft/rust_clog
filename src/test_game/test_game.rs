@@ -2,7 +2,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use glam::{Vec2, Vec4};
 use sokol::{app as sapp, gfx as sg};
-use crate::engine::{Camera2D, Circle, Game, GameConfig, InputManager, Quad, Renderer};
+use crate::engine::{Camera2D, Circle, Game, GameConfig, InputManager, Quad, Renderer, Sprite};
 
 pub struct TestGame {
     frame_count: u64,
@@ -10,6 +10,10 @@ pub struct TestGame {
     my_box: Quad,
     my_circle: Circle,
     world_boxes: Vec<Quad>,
+    test_sprite: Sprite,
+    current_texture_name: String,
+    texture_names: Vec<String>,
+    current_texture_index: usize,
 }
 
 impl TestGame {
@@ -33,6 +37,17 @@ impl TestGame {
             my_box: Quad::new(0.0, 0.0, 100.0, 50.0, Vec4::new(1.0, 0.0, 0.0, 1.0)), // Start at origin
             my_circle: Circle::new(200.0, 200.0, 75.0, Vec4::new(0.0, 1.0, 0.0, 1.0)),
             world_boxes,
+            test_sprite: Sprite::new()  // ADD THIS - starts as solid color
+                .with_position(Vec2::new(-200.0, -100.0))
+                .with_size(Vec2::new(128.0, 128.0))
+                .with_color(Vec4::new(1.0, 0.5, 0.8, 1.0)),
+                current_texture_name: "player".to_string(),     // ADD
+            texture_names: vec![                            // ADD
+                "player".to_string(),
+                "bullet".to_string(), 
+                "alien".to_string()
+            ],
+            current_texture_index: 0,
         }
     }
 
@@ -51,18 +66,29 @@ impl Game for TestGame {
             .with_samples(4)
     }
     
-    fn init(&mut self, config: &GameConfig) {
+    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer) {
 
         self.current_background = config.background_color;
+        
+        // Load the texture once here.
+        for texture_name in &self.texture_names {
+            let path = format!("assets/{}.png", texture_name);
+            if let Ok(_) = renderer.load_texture(texture_name, &path) {
+                println!("Loaded texture: {}", texture_name);
+            } else {
+                eprintln!("Failed to load texture: {}", texture_name);
+            }
+        }
 
         println!("Game initialized!");
         println!("Window size: {}x{}", sapp::width(), sapp::height());
+
     }
 
     fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D) {
         self.frame_count += 1;
         
-        // self.update_background_color();
+        self.update_background_color();
 
         let time: f32 = self.frame_count as f32 * dt;
 
@@ -118,10 +144,14 @@ impl Game for TestGame {
         }
         
         // Mouse interaction - change circle color when clicked
-        if input.is_mouse_button_down(sapp::Mousebutton::Left) {
-            let mouse_pos = input.mouse_position();
-            let distance = (mouse_pos - self.my_circle.center).length();
+        if input.is_mouse_button_pressed(sapp::Mousebutton::Left) {
+            let mouse_world_pos = camera.screen_to_world(input.mouse_position());
+            println!("Clicked world position: ({:.1}, {:.1})", mouse_world_pos.x, mouse_world_pos.y);
+            
+            // Use the world position for distance calculation
+            let distance = (mouse_world_pos - self.my_circle.center).length();
             if distance <= self.my_circle.radius {
+                println!("Change color {:.1}", self.my_circle.center);
                 // Clicked inside circle
                 let mut hasher = DefaultHasher::new();
                 self.frame_count.hash(&mut hasher);
@@ -135,8 +165,6 @@ impl Game for TestGame {
             }
         }
 
-        // Example camera controls:
-        
         // Camera follows the box with some offset
         // let target_camera_pos = self.my_box.position + Vec2::new(50.0, 25.0);
         // camera.set_position(target_camera_pos);
@@ -169,10 +197,10 @@ impl Game for TestGame {
         
         // Camera rotation with R/T keys (for fun)
         if input.is_key_down(sapp::Keycode::R) {
-            camera.rotate_by(dt * 1.0);
+            self.test_sprite.rotation += (-dt * 1.0);
         }
         if input.is_key_down(sapp::Keycode::T) {
-            camera.rotate_by(-dt * 1.0);
+            camera.rotate_by(dt * 1.0);
         }
         
         // Reset camera with spacebar
@@ -189,19 +217,13 @@ impl Game for TestGame {
             camera.add_shake(20.0, 1.0); // Strong shake for 1 second
         }
         
-        // Mouse interaction using camera coordinate conversion
-        if input.is_mouse_button_pressed(sapp::Mousebutton::Left) {
-            let mouse_world_pos = camera.screen_to_world(input.mouse_position());
-            println!("Clicked world position: ({:.1}, {:.1})", mouse_world_pos.x, mouse_world_pos.y);
-            
-            // Check if clicked on circle (now works correctly with camera transform)
-            let distance = (mouse_world_pos - self.my_circle.center).length();
-            if distance <= self.my_circle.radius {
-                println!("Clicked on circle!");
-                // Change circle color logic here
-            }
+        // sprite changing
+        if input.is_key_pressed(sapp::Keycode::Enter) {
+            self.current_texture_index = (self.current_texture_index + 1) % self.texture_names.len();
+            self.current_texture_name = self.texture_names[self.current_texture_index].clone();
+            println!("Switched to texture: {}", self.current_texture_name);
         }
-        
+
         if self.frame_count % 60 == 0 {
             println!("FPS: {:.1} | Camera: pos({:.0}, {:.0}) zoom({:.2}) rot({:.2})", 
                      1.0 / dt, 
@@ -217,14 +239,21 @@ impl Game for TestGame {
 
     fn render_with_renderer(&mut self, renderer: &mut Renderer, camera: &mut Camera2D) {
         // Game responsibility: Decide what to draw
+        
+        renderer.begin_frame();
+
         for world_box in &self.world_boxes {
             renderer.draw_quad(world_box);
         }
 
         renderer.draw_quad(&self.my_box);
         renderer.draw_circle(&self.my_circle);
+        
+        self.test_sprite.texture = renderer.get_texture(&self.current_texture_name);
+        renderer.draw_sprite(&self.test_sprite);
     }
 
+    // handle events that are not movement based
     fn handle_event(&mut self, event: &sapp::Event) {
         match event._type {
             sapp::EventType::KeyDown => {
@@ -246,6 +275,4 @@ impl Game for TestGame {
     fn get_background_color(&self) -> Option<sg::Color> {
         Some(self.current_background)
     }
-
-
 }

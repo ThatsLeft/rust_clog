@@ -7,3 +7,4 @@ authors = ["Thomas Mannsverk Eliassen"]
 [dependencies]
 glam = "0.30.5"
 sokol = { version="*", git="https://github.com/floooh/sokol-rust.git" }
+image = "0.24"

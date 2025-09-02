@@ -88,13 +88,6 @@ extern "C" fn init<T: Game>(user_data: *mut ffi::c_void) {
         ..Default::default()
     });
 
-    // Set up default pass action for clearing screen
-    state.pass_action.colors[0] = sg::ColorAttachmentAction {
-        load_action: sg::LoadAction::Clear,
-        clear_value: sg::Color { r: 0.6, g: 0.6, b: 0.6, a: 1.0 },
-        ..Default::default()
-    };
-
     // Print backend info (helpful for debugging)
     let backend = sg::query_backend();
     match &backend {
@@ -115,6 +108,13 @@ extern "C" fn init<T: Game>(user_data: *mut ffi::c_void) {
         },
     }
 
+    // Set up default pass action for clearing screen
+    state.pass_action.colors[0] = sg::ColorAttachmentAction {
+        load_action: sg::LoadAction::Clear,
+        clear_value: sg::Color { r: 0.6, g: 0.6, b: 0.6, a: 1.0 },
+        ..Default::default()
+    };
+    
     //  Init render
     state.renderer.init();
 
@@ -126,7 +126,7 @@ extern "C" fn init<T: Game>(user_data: *mut ffi::c_void) {
 
     // Let the game do its initialization
     let config = T::config();
-    state.game.init(&config);
+    state.game.init(&config, &mut state.renderer);
 }
 
 extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {

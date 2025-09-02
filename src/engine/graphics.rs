@@ -1,12 +1,13 @@
 use sokol::gfx as sg;
 use glam::{Mat4, Vec2, Vec4};
-use std::mem;
+use std::{collections::HashMap, mem};
 
 use crate::engine::Camera2D;
 
 #[repr(C)]
 struct Vertex {
     pos: [f32; 2],
+    texcoord: [f32; 2],
     color: [f32; 4],
 }
 
@@ -56,11 +57,144 @@ impl Circle {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct Sprite {
+    pub position: Vec2,
+    pub size: Vec2,
+    pub uv: Vec4,                  
+    pub color: Vec4,               
+    pub rotation: f32,
+    pub texture: Option<sg::Image>,
+}
+
+impl Sprite {
+    pub fn new() -> Self {
+        Self {
+            position: Vec2::ZERO,
+            size: Vec2::new(32.0, 32.0),
+            uv: Vec4::new(0.0, 0.0, 1.0, 1.0),
+            color: Vec4::ONE,
+            rotation: 0.0,
+            texture: None,
+        }
+    }
+
+    pub fn with_texture(mut self, texture: sg::Image) -> Self {
+        self.texture = Some(texture);
+        self
+    }
+
+    pub fn with_position(mut self, pos: Vec2) -> Self {
+        self.position = pos;
+        self
+    }
+
+    pub fn with_size(mut self, size: Vec2) -> Self {
+        self.size = size;
+        self
+    }
+
+    pub fn with_color(mut self, color: Vec4) -> Self {
+        self.color = color;
+        self
+    }
+
+    pub fn with_rotation(mut self, rotation: f32) -> Self {
+        self.rotation = rotation;
+        self
+    }
+
+    pub fn with_uv(mut self, uv: Vec4) -> Self {
+        self.uv = uv;
+        self
+    }
+}
+
+pub struct TextureManager {
+    textures: HashMap<String, sg::Image>,
+    white_texture: sg::Image,
+}
+
+impl TextureManager {
+    pub fn new() -> Self {
+        Self {
+            textures: HashMap::new(),
+            white_texture: sg::Image::default(),
+        }
+    }
+
+    pub fn init(&mut self) {
+        let white_pixels = [255u8, 255, 255, 255];
+        self.white_texture = sg::make_image(&sg::ImageDesc {
+            width: 1,
+            height: 1,
+            data: sg::ImageData {
+                subimage: [[sg::Range {
+                    ptr: white_pixels.as_ref().as_ptr() as *const _,
+                    size: white_pixels.as_ref().len(),
+                }; 16]; 6],
+            },
+            ..Default::default()
+        });
+    }
+
+    pub fn load_texture(&mut self, name: &str, path: &str) -> Result<sg::Image, Box<dyn std::error::Error>> {
+        // Check if already loaded
+        if let Some(&texture) = self.textures.get(name) {
+            return Ok(texture);
+        }
+
+        // Load image file
+        let img = image::open(path)?;
+        let rgba = img.to_rgba8();
+        let (width, height) = rgba.dimensions();
+
+        // Create sokol texture
+        let sg_texture = sg::make_image(&sg::ImageDesc {
+            width: width as i32,
+            height: height as i32,
+            pixel_format: sg::PixelFormat::Rgba8,
+            data: sg::ImageData {
+                subimage: [[sg::Range {
+                    ptr: rgba.as_raw().as_ptr() as *const _,
+                    size: rgba.as_raw().len(),
+                }; 16]; 6],
+            },
+            ..Default::default()
+        });
+
+        // Store in cache
+        self.textures.insert(name.to_string(), sg_texture);
+        Ok(sg_texture)
+    }
+
+    pub fn get_texture(&self, name: &str) -> Option<sg::Image> {
+        self.textures.get(name).copied()
+    }
+
+    pub fn get_white_texture(&self) -> sg::Image {
+        self.white_texture
+    }
+}
+
+struct DrawBatch {
+    texture: sg::Image,
+    start_index: usize,
+    index_count: usize,
+}
+
 pub struct Renderer {
-    pipeline: sg::Pipeline,
+    textured_pipeline: sg::Pipeline,
+    colored_pipeline: sg::Pipeline,
     bind: sg::Bindings,
     vertices: Vec<Vertex>,
     indices: Vec<u16>,
+    texture_manager: TextureManager,
+    batches: Vec<DrawBatch>,
+    sampler: sg::Sampler,
+    vbuf_size: usize,
+    ibuf_size: usize,
+    view_cache: HashMap<u32, sg::View>,
 }
 
 /// Implementation for new, init, flush.
@@ -68,22 +202,82 @@ pub struct Renderer {
 impl Renderer {
     pub fn new() -> Self {
         Self {
-            pipeline: sg::Pipeline::default(),
+            textured_pipeline: sg::Pipeline::default(),
+            colored_pipeline: sg::Pipeline::default(),
             bind: sg::Bindings::default(),
             vertices: Vec::new(),
             indices: Vec::new(),
+            texture_manager: TextureManager::new(),
+            batches: Vec::new(),
+            sampler: sg::Sampler::default(),
+            vbuf_size: 0,
+            ibuf_size: 0,
+            view_cache: HashMap::new(),
         }
     }
 
     pub fn init(&mut self) {
-        
-        let vs_source = "
+        self.texture_manager.init();
+
+        // Create sampler for texture filtering
+        self.sampler = sg::make_sampler(&sg::SamplerDesc {
+            min_filter: sg::Filter::Nearest,  // or Nearest for pixel art
+            mag_filter: sg::Filter::Nearest,  // or Nearest for pixel art
+            wrap_u: sg::Wrap::ClampToEdge,
+            wrap_v: sg::Wrap::ClampToEdge,
+            ..Default::default()
+        });
+
+        let textured_vs_source = "
 cbuffer uniforms : register(b0) {
     float4x4 mvp;
 };
 
 struct vs_in {
     float2 position : POSITION;
+    float2 texcoord : TEXCOORD;
+    float4 color    : COLOR;
+};
+    
+struct vs_out {
+    float4 position : SV_Position;
+    float2 texcoord : TEXCOORD;
+    float4 color    : COLOR;
+};
+
+vs_out main(vs_in inp) {
+    vs_out outp;
+    outp.position = mul(mvp, float4(inp.position, 0.0, 1.0));
+    outp.texcoord = inp.texcoord;
+    outp.color = inp.color;
+    return outp;
+}
+\0";
+
+        let textured_fs_source = "
+Texture2D tex : register(t0);
+SamplerState smp : register(s0);
+
+struct ps_in {
+    float4 position : SV_Position;
+    float2 texcoord : TEXCOORD;
+    float4 color : COLOR;
+};
+
+float4 main(ps_in inp) : SV_Target0 {
+    float4 tex_color = tex.Sample(smp, inp.texcoord);
+    return tex_color * inp.color;
+}
+\0";
+
+        let color_vs_source = "
+cbuffer uniforms : register(b0) {
+    float4x4 mvp;
+};
+
+struct vs_in {
+    float2 position : POSITION;
+    float2 texcoord : TEXCOORD;
     float4 color    : COLOR;
 };
     
@@ -91,6 +285,7 @@ struct vs_out {
     float4 position : SV_Position;
     float4 color    : COLOR;
 };
+
 vs_out main(vs_in inp) {
     vs_out outp;
     outp.position = mul(mvp, float4(inp.position, 0.0, 1.0));
@@ -99,7 +294,10 @@ vs_out main(vs_in inp) {
 }
 \0";
 
-        let fs_source = "
+        let color_fs_source = "
+Texture2D tex : register(t0);
+SamplerState smp : register(s0);
+
 struct ps_in {
     float4 position : SV_Position;
     float4 color : COLOR;
@@ -109,14 +307,14 @@ float4 main(ps_in inp) : SV_Target0 {
     return inp.color;
 }
 \0";
-    
-        let shader = sg::make_shader(&sg::ShaderDesc {
+        
+        let texture_shader = sg::make_shader(&sg::ShaderDesc {
             vertex_func: sg::ShaderFunction {
-                source: vs_source.as_ptr() as *const i8,
+                source: textured_vs_source.as_ptr() as *const i8,
                 ..Default::default()
             },
             fragment_func: sg::ShaderFunction {
-                source: fs_source.as_ptr() as *const i8,
+                source: textured_fs_source.as_ptr() as *const i8,
                 ..Default::default()
             },
             attrs: [
@@ -126,11 +324,15 @@ float4 main(ps_in inp) : SV_Target0 {
                     ..Default::default()
                 },
                 sg::ShaderVertexAttr {
+                    hlsl_sem_name: "TEXCOORD\0".as_ptr() as *const i8,
+                    hlsl_sem_index: 0,
+                    ..Default::default()
+                },
+                sg::ShaderVertexAttr {
                     hlsl_sem_name: "COLOR\0".as_ptr() as *const i8,
                     hlsl_sem_index: 0,
                     ..Default::default()
                 },
-                sg::ShaderVertexAttr::default(),
                 sg::ShaderVertexAttr::default(),
                 sg::ShaderVertexAttr::default(),
                 sg::ShaderVertexAttr::default(),
@@ -160,61 +362,277 @@ float4 main(ps_in inp) : SV_Target0 {
                 sg::ShaderUniformBlock::default(),
                 sg::ShaderUniformBlock::default(),
             ],
+            // Define the texture view (image resource)
+            views: [
+                sg::ShaderView {
+                    texture: sg::ShaderTextureView {
+                        stage: sg::ShaderStage::Fragment,
+                        image_type: sg::ImageType::Dim2,  // 2D texture
+                        sample_type: sg::ImageSampleType::Float,
+                        multisampled: false,
+                        hlsl_register_t_n: 0,  // Maps to register(t0) in HLSL
+                        msl_texture_n: 0,
+                        wgsl_group1_binding_n: 0,
+                    },
+                    storage_buffer: sg::ShaderStorageBufferView::default(),
+                    storage_image: sg::ShaderStorageImageView::default(),
+                },
+                // Fill remaining with defaults (28 total)
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+                sg::ShaderView::default(),
+            ],
+            // Define the sampler
+            samplers: [
+                sg::ShaderSampler {
+                    stage: sg::ShaderStage::Fragment,
+                    sampler_type: sg::SamplerType::Filtering,
+                    hlsl_register_s_n: 0,  // Maps to register(s0) in HLSL
+                    ..Default::default()
+                },
+                // Fill remaining with defaults (16 total)
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+                sg::ShaderSampler::default(),
+            ],
+            // Link texture view and sampler together
+            texture_sampler_pairs: [
+                sg::ShaderTextureSamplerPair {
+                    stage: sg::ShaderStage::Fragment,
+                    view_slot: 0,
+                    sampler_slot: 0,
+                    glsl_name: std::ptr::null()
+                },
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default(),
+                sg::ShaderTextureSamplerPair::default()
+            ],
             ..Default::default()
         });
 
-        // Create pipeline
-        self.pipeline = sg::make_pipeline(&sg::PipelineDesc {
-            shader,
-            layout: sg::VertexLayoutState {
-                attrs: [
-                    sg::VertexAttrState {
-                        buffer_index: 0,
-                        offset: 0,
-                        format: sg::VertexFormat::Float2,
-                    }, // position
-                    sg::VertexAttrState {
-                        buffer_index: 0,
-                        offset: 8, // 2 floats * 4 bytes = 8 bytes offset
-                        format: sg::VertexFormat::Float4,
-                    }, // color
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                    sg::VertexAttrState::default(),
-                ],
-                buffers: [
-                    sg::VertexBufferLayoutState {
-                        stride: mem::size_of::<Vertex>() as i32,
-                        step_func: sg::VertexStep::PerVertex,
-                        step_rate: 1,
-                    },
-                    sg::VertexBufferLayoutState::default(),
-                    sg::VertexBufferLayoutState::default(),
-                    sg::VertexBufferLayoutState::default(),
-                    sg::VertexBufferLayoutState::default(),
-                    sg::VertexBufferLayoutState::default(),
-                    sg::VertexBufferLayoutState::default(),
-                    sg::VertexBufferLayoutState::default(),
-                ],
+        let colored_shader = sg::make_shader(&sg::ShaderDesc {
+            vertex_func: sg::ShaderFunction {
+                source: color_vs_source.as_ptr() as *const i8,
+                ..Default::default()
             },
-            index_type: sg::IndexType::Uint16,
+            fragment_func: sg::ShaderFunction {
+                source: color_fs_source.as_ptr() as *const i8,
+                ..Default::default()
+            },
+            attrs: [
+                sg::ShaderVertexAttr {
+                    hlsl_sem_name: "POSITION\0".as_ptr() as *const i8,
+                    hlsl_sem_index: 0,
+                    ..Default::default()
+                },
+                sg::ShaderVertexAttr {
+                    hlsl_sem_name: b"TEXCOORD\0".as_ptr() as *const i8,
+                    hlsl_sem_index: 0,
+                    ..Default::default()
+                },
+                sg::ShaderVertexAttr {
+                    hlsl_sem_name: "COLOR\0".as_ptr() as *const i8,
+                    hlsl_sem_index: 0,
+                    ..Default::default()
+                },
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+                sg::ShaderVertexAttr::default(),
+            ],
+            uniform_blocks: [
+                sg::ShaderUniformBlock {
+                    stage: sg::ShaderStage::Vertex,
+                    size: mem::size_of::<Uniforms>() as u32,
+                    hlsl_register_b_n: 0,
+                    ..Default::default()
+                },
+                sg::ShaderUniformBlock::default(),
+                sg::ShaderUniformBlock::default(),
+                sg::ShaderUniformBlock::default(),
+                sg::ShaderUniformBlock::default(),
+                sg::ShaderUniformBlock::default(),
+                sg::ShaderUniformBlock::default(),
+                sg::ShaderUniformBlock::default(),
+            ],
             ..Default::default()
         });
+
+        // Vertex layout (same for both pipelines)
+        let vertex_layout = sg::VertexLayoutState {
+            attrs: [
+                sg::VertexAttrState {
+                    buffer_index: 0,
+                    offset: 0,
+                    format: sg::VertexFormat::Float2,
+                }, // position
+                sg::VertexAttrState {
+                    buffer_index: 0,
+                    offset: 8,
+                    format: sg::VertexFormat::Float2,
+                }, // texcoord
+                sg::VertexAttrState {
+                    buffer_index: 0,
+                    offset: 16,
+                    format: sg::VertexFormat::Float4,
+                }, // color
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+                sg::VertexAttrState::default(),
+            ],
+            buffers: [
+                sg::VertexBufferLayoutState {
+                    stride: mem::size_of::<Vertex>() as i32,
+                    step_func: sg::VertexStep::PerVertex,
+                    step_rate: 1,
+                },
+                sg::VertexBufferLayoutState::default(),
+                sg::VertexBufferLayoutState::default(),
+                sg::VertexBufferLayoutState::default(),
+                sg::VertexBufferLayoutState::default(),
+                sg::VertexBufferLayoutState::default(),
+                sg::VertexBufferLayoutState::default(),
+                sg::VertexBufferLayoutState::default(),
+            ],
+        };
+
+        // Create pipeline
+        self.textured_pipeline = sg::make_pipeline(&sg::PipelineDesc {
+            shader: texture_shader,
+            layout: vertex_layout,
+            index_type: sg::IndexType::Uint16,
+            primitive_type: sg::PrimitiveType::Triangles,
+            cull_mode: sg::CullMode::None,
+            depth: sg::DepthState {
+                write_enabled: false,
+                compare: sg::CompareFunc::Always,
+                ..Default::default()
+            },
+            colors: [
+                sg::ColorTargetState {
+                    blend: sg::BlendState {
+                        enabled: true,
+                        src_factor_rgb: sg::BlendFactor::SrcAlpha,
+                        dst_factor_rgb: sg::BlendFactor::OneMinusSrcAlpha,
+                        src_factor_alpha: sg::BlendFactor::One,
+                        dst_factor_alpha: sg::BlendFactor::OneMinusSrcAlpha,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                sg::ColorTargetState::default(),
+                sg::ColorTargetState::default(),
+                sg::ColorTargetState::default(),
+            ],
+            ..Default::default()
+        });
+
+        self.colored_pipeline = sg::make_pipeline(&sg::PipelineDesc {
+            shader: colored_shader,
+            layout: vertex_layout,
+            index_type: sg::IndexType::Uint16,
+            primitive_type: sg::PrimitiveType::Triangles,
+            cull_mode: sg::CullMode::None,
+            depth: sg::DepthState {
+                write_enabled: false,
+                compare: sg::CompareFunc::Always,
+                ..Default::default()
+            },
+            colors: [
+                sg::ColorTargetState {
+                    blend: sg::BlendState {
+                        enabled: true,
+                        src_factor_rgb: sg::BlendFactor::SrcAlpha,
+                        dst_factor_rgb: sg::BlendFactor::OneMinusSrcAlpha,
+                        src_factor_alpha: sg::BlendFactor::One,
+                        dst_factor_alpha: sg::BlendFactor::OneMinusSrcAlpha,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                sg::ColorTargetState::default(),
+                sg::ColorTargetState::default(),
+                sg::ColorTargetState::default(),
+            ],
+            ..Default::default()
+        });
+
+        let initial_vtx_count = 1000usize;
+        let initial_idx_count = 1500usize;
+
+        let vbuf_size_bytes = initial_vtx_count * mem::size_of::<Vertex>();
+        let ibuf_size_bytes = initial_idx_count * mem::size_of::<u16>();
 
         // Create vertex buffer
         let vbuf = sg::make_buffer(&sg::BufferDesc {
-            size: (1000 * mem::size_of::<Vertex>()), // Space for many vertices
+            size: vbuf_size_bytes, // Space for many vertices
             usage: sg::BufferUsage {
                 vertex_buffer: true,
                 stream_update: true,
@@ -225,7 +643,7 @@ float4 main(ps_in inp) : SV_Target0 {
 
         // Create index buffer
         let ibuf = sg::make_buffer(&sg::BufferDesc {
-            size: (1500 * mem::size_of::<u16>()),
+            size: ibuf_size_bytes,
             usage: sg::BufferUsage {
                 index_buffer: true,
                 stream_update: true,
@@ -236,9 +654,18 @@ float4 main(ps_in inp) : SV_Target0 {
 
         self.bind.vertex_buffers[0] = vbuf;
         self.bind.index_buffer = ibuf;
+        self.vbuf_size = vbuf_size_bytes;
+        self.ibuf_size = ibuf_size_bytes;
+        self.bind.samplers[0] = self.sampler;
 
         println!("Renderer initialized with shaders and buffers");
 
+    }
+
+    pub fn begin_frame(&mut self) {
+        self.vertices.clear();
+        self.indices.clear();
+        self.batches.clear();
     }
 
     pub fn flush(&mut self, camera: &mut Camera2D) {
@@ -246,12 +673,56 @@ float4 main(ps_in inp) : SV_Target0 {
             return;
         }
 
+        let vertex_bytes = self.vertices.len() * mem::size_of::<Vertex>();
+        let index_bytes = self.indices.len() * mem::size_of::<u16>();
+
+        // If vertex buffer too small -> recreate with new size (double strategy can help)
+        if vertex_bytes > self.vbuf_size {
+            // choose new size (double until big enough) to reduce realloc churn
+            let mut new_vbuf_size = self.vbuf_size.max(1);
+            while new_vbuf_size < vertex_bytes {
+                new_vbuf_size *= 2;
+            }
+            // destroy old buffer and make a new one
+            sg::destroy_buffer(self.bind.vertex_buffers[0]);
+            let new_vbuf = sg::make_buffer(&sg::BufferDesc {
+                size: new_vbuf_size,
+                usage: sg::BufferUsage {
+                    vertex_buffer: true,
+                    stream_update: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+            self.bind.vertex_buffers[0] = new_vbuf;
+            self.vbuf_size = new_vbuf_size;
+        }
+
+        if index_bytes > self.ibuf_size {
+            let mut new_ibuf_size = self.ibuf_size.max(1);
+            while new_ibuf_size < index_bytes {
+                new_ibuf_size *= 2;
+            }
+            sg::destroy_buffer(self.bind.index_buffer);
+            let new_ibuf = sg::make_buffer(&sg::BufferDesc {
+                size: new_ibuf_size,
+                usage: sg::BufferUsage {
+                    index_buffer: true,
+                    stream_update: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+            self.bind.index_buffer = new_ibuf;
+            self.ibuf_size = new_ibuf_size;
+        }
+
         // Update vertex buffer
         sg::update_buffer(
             self.bind.vertex_buffers[0],
             &sg::Range {
                 ptr: self.vertices.as_ptr() as *const _,
-                size: self.vertices.len() * mem::size_of::<Vertex>(),
+                size: vertex_bytes,
             },
         );
 
@@ -260,35 +731,73 @@ float4 main(ps_in inp) : SV_Target0 {
             self.bind.index_buffer,
             &sg::Range {
                 ptr: self.indices.as_ptr() as *const _,
-                size: self.indices.len() * mem::size_of::<u16>(),
+                size: index_bytes,
             },
         );
-
-        // Set up orthographic projection matrix
-        // let width = sokol::app::width() as f32;
-        // let height = sokol::app::height() as f32;
-        // let ortho = Mat4::orthographic_rh(0.0, width, height, 0.0, -1.0, 1.0);
         
-        // Use camera's view-projection matrix instead of hardcoded orthographic
+        // Setup uniforms
         let view_proj = camera.get_view_projection_matrix();
-
         let uniforms = Uniforms {
             mvp: view_proj.to_cols_array_2d(),
         };
 
-        // Render
-        sg::apply_pipeline(self.pipeline);
-        sg::apply_bindings(&self.bind);
-        sg::apply_uniforms(0, &sg::Range {
-            ptr: &uniforms as *const _ as *const _,
-            size: mem::size_of::<Uniforms>(),
+        // Draw all batches
+        for batch in &self.batches {
+            // Select pipeline based on whether we're using textures
+            let uses_texture = batch.texture.id != self.texture_manager.white_texture.id;
+            let pipeline = if uses_texture {
+                self.textured_pipeline
+            } else {
+                self.colored_pipeline
+            };
+
+            // Bind texture and sampler
+            let view = if let Some(&cached_view) = self.view_cache.get(&batch.texture.id) {
+                cached_view
+            } else {
+                let new_view = sg::make_view(&sg::ViewDesc {
+                    texture: sg::TextureViewDesc {
+                        image: batch.texture,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                });
+                self.view_cache.insert(batch.texture.id, new_view);
+                new_view
+            };
+            
+            self.bind.views[0] = view;
+
+            self.bind.samplers[0] = self.sampler;
+
+            // Apply pipeline and bindings
+            sg::apply_pipeline(pipeline);
+            sg::apply_bindings(&self.bind);
+            sg::apply_uniforms(0, &sg::Range {
+                ptr: &uniforms as *const _ as *const _,
+                size: mem::size_of::<Uniforms>(),
+            });
+
+            // Draw this batch
+            sg::draw(batch.start_index, batch.index_count, 1);
+        }
+    }
+
+    fn add_batch(&mut self, texture: sg::Image, start_index: usize, index_count: usize) {
+        // Check if we can merge with the last batch
+        if let Some(last_batch) = self.batches.last_mut() {
+            if last_batch.texture.id == texture.id {
+                last_batch.index_count += index_count;
+                return;
+            }
+        }
+
+        // Create new batch
+        self.batches.push(DrawBatch {
+            texture,
+            start_index,
+            index_count,
         });
-
-        sg::draw(0, self.indices.len(), 1);
-
-        // Clear for next frame
-        self.vertices.clear();
-        self.indices.clear();
     }
 }
 
@@ -296,7 +805,8 @@ float4 main(ps_in inp) : SV_Target0 {
 impl Renderer {
     pub fn draw_quad(&mut self, quad: &Quad) {
         let start_vertex = self.vertices.len() as u16;
-        
+        let start_index = self.indices.len();
+
         // Create 4 vertices for the quad
         let x1 = quad.position.x;
         let y1 = quad.position.y;
@@ -306,11 +816,11 @@ impl Renderer {
         let color = [quad.color.x, quad.color.y, quad.color.z, quad.color.w];
 
         // Add vertices (clockwise)
-        self.vertices.push(Vertex { pos: [x1, y1], color });
-        self.vertices.push(Vertex { pos: [x2, y1], color });
-        self.vertices.push(Vertex { pos: [x2, y2], color });
-        self.vertices.push(Vertex { pos: [x1, y2], color });
-        
+        self.vertices.push(Vertex { pos: [x1, y1], texcoord: [0.0, 0.0], color });
+        self.vertices.push(Vertex { pos: [x2, y1], texcoord: [1.0, 0.0], color });
+        self.vertices.push(Vertex { pos: [x2, y2], texcoord: [1.0, 1.0], color });
+        self.vertices.push(Vertex { pos: [x1, y2], texcoord: [0.0, 1.0], color });
+                
         // Add indices for two triangles
         let indices = [
             start_vertex, start_vertex + 1, start_vertex + 2,
@@ -318,6 +828,8 @@ impl Renderer {
         ];
         
         self.indices.extend_from_slice(&indices);
+
+        self.add_batch(self.texture_manager.white_texture, start_index, 6);
     }
 
     pub fn draw_circle(&mut self, circle: &Circle) {
@@ -327,6 +839,7 @@ impl Renderer {
         // Add center vertex
         self.vertices.push(Vertex { 
             pos: [circle.center.x, circle.center.y], 
+            texcoord: [0.5, 0.5],
             color 
         });
         
@@ -336,10 +849,15 @@ impl Renderer {
             let x = circle.center.x + angle.cos() * circle.radius;
             let y = circle.center.y + angle.sin() * circle.radius;
             
-            self.vertices.push(Vertex { pos: [x, y], color });
+            self.vertices.push( Vertex { 
+                pos: [x, y],
+                texcoord: [0.5, 0.5],
+                    color 
+            });
         }
         
         // Add triangles from center to each edge
+        let triangle_count = circle.segments * 3;
         for i in 0..circle.segments {
             let next = (i + 1) % circle.segments;
             self.indices.extend_from_slice(&[
@@ -348,6 +866,78 @@ impl Renderer {
                 center_vertex + 1 + next as u16, // next point on circumference
             ]);
         }
+
+        self.add_batch(self.texture_manager.white_texture, center_vertex as usize, triangle_count as usize);
+    }
+
+    pub fn draw_sprite(&mut self, sprite: &Sprite) {
+        let start_vertex = self.vertices.len() as u16;
+        let start_index = self.indices.len();
+
+        // Determine which texture to use
+        let texture = sprite.texture.unwrap_or(self.texture_manager.white_texture);
+        
+        // Create 4 vertices for the sprite quad
+        let half_size = sprite.size * 0.5;
+        let cos_rot = sprite.rotation.cos();
+        let sin_rot = sprite.rotation.sin();
+
+        let local_positions = [
+            Vec2::new(-half_size.x, -half_size.y), // Top-left
+            Vec2::new(half_size.x, -half_size.y),  // Top-right
+            Vec2::new(half_size.x, half_size.y),   // Bottom-right
+            Vec2::new(-half_size.x, half_size.y),  // Bottom-left
+        ];
+
+        let uvs = [
+            Vec2::new(sprite.uv.x, sprite.uv.y),                           // Top-left UV
+            Vec2::new(sprite.uv.x + sprite.uv.z, sprite.uv.y),           // Top-right UV
+            Vec2::new(sprite.uv.x + sprite.uv.z, sprite.uv.y + sprite.uv.w), // Bottom-right UV
+            Vec2::new(sprite.uv.x, sprite.uv.y + sprite.uv.w),           // Bottom-left UV
+        ];
+
+        let color = [sprite.color.x, sprite.color.y, sprite.color.z, sprite.color.w];
+
+        // Add vertices with rotation applied
+        for i in 0..4 {
+            let local_pos = local_positions[i];
+            
+            // Apply rotation
+            let rotated_pos = if sprite.rotation != 0.0 {
+                Vec2::new(
+                    local_pos.x * cos_rot - local_pos.y * sin_rot,
+                    local_pos.x * sin_rot + local_pos.y * cos_rot,
+                )
+            } else {
+                local_pos
+            };
+
+            // Apply world position
+            let world_pos = sprite.position + rotated_pos;
+
+            self.vertices.push(Vertex {
+                pos: [world_pos.x, world_pos.y],
+                texcoord: [uvs[i].x, uvs[i].y],
+                color,
+            });
+        }
+
+        // Add indices for two triangles
+        let indices = [
+            start_vertex, start_vertex + 1, start_vertex + 2,
+            start_vertex, start_vertex + 2, start_vertex + 3,
+        ];
+        self.indices.extend_from_slice(&indices);
+        self.add_batch(texture, start_index, 6);
+    }
+
+    // ADD texture loading method:
+    pub fn load_texture(&mut self, name: &str, path: &str) -> Result<sg::Image, Box<dyn std::error::Error>> {
+        self.texture_manager.load_texture(name, path)
+    }
+
+    pub fn get_texture(&self, name: &str) -> Option<sg::Image> {
+        self.texture_manager.get_texture(name)
     }
 
 }

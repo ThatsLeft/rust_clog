@@ -39,35 +39,6 @@ impl Camera2D {
         }
     }
 
-    pub fn set_position(&mut self, position: Vec2) {
-        if self.position != position {
-            self.position = position;
-            self.transform_dirty = true;
-        }
-    }
-
-    pub fn set_zoom(&mut self, zoom: f32) {
-        let clamped_zoom = zoom.max(0.1).min(10.0); // Reasonable zoom limits
-        if self.zoom != clamped_zoom {
-            self.zoom = clamped_zoom;
-            self.transform_dirty = true;
-        }
-    }
-
-    pub fn set_rotation(&mut self, rotation: f32) {
-        if self.rotation != rotation {
-            self.rotation = rotation;
-            self.transform_dirty = true;
-        }
-    }
-
-    // Game calls this to trigger shake
-    pub fn add_shake(&mut self, intensity: f32, duration: f32) {
-        self.shake_intensity = intensity;
-        self.shake_duration = duration;
-        self.shake_timer = duration;
-    }
-
     // Engine calls this each frame
     pub fn update_shake(&mut self, dt: f32) {
         if self.shake_timer > 0.0 {
@@ -99,19 +70,6 @@ impl Camera2D {
         }
     }
 
-    // Camera movement methods
-    pub fn move_by(&mut self, delta: Vec2) {
-        self.set_position(self.position + delta);
-    }
-
-    pub fn zoom_by(&mut self, delta: f32) {
-        self.set_zoom(self.zoom + delta);
-    }
-
-    pub fn rotate_by(&mut self, delta: f32) {
-        self.set_rotation(self.rotation + delta);
-    }
-
     // Engine calls this when window size changes
     pub fn set_viewport_size(&mut self, width: f32, height: f32) {
         if self.viewport_width != width || self.viewport_height != height {
@@ -127,38 +85,6 @@ impl Camera2D {
             self.update_matrices();
         }
         self.view_projection
-    }
-
-    // Coordinate conversion methods (useful for mouse interaction)
-    pub fn screen_to_world(&mut self, screen_pos: Vec2) -> Vec2 {
-        if self.transform_dirty {
-            self.update_matrices();
-        }
-        
-        // Convert screen coordinates to normalized device coordinates (-1 to 1)
-        let ndc_x = (screen_pos.x / self.viewport_width) * 2.0 - 1.0;
-        let ndc_y = (screen_pos.y / self.viewport_height) * 2.0 - 1.0;
-        
-        // Transform by inverse view-projection matrix
-        let inverse_vp = self.view_projection.inverse();
-        let world_pos_4d = inverse_vp * glam::Vec4::new(ndc_x, ndc_y, 0.0, 1.0);
-        
-        Vec2::new(world_pos_4d.x, world_pos_4d.y)
-    }
-
-    pub fn world_to_screen(&mut self, world_pos: Vec2) -> Vec2 {
-        if self.transform_dirty {
-            self.update_matrices();
-        }
-        
-        // Transform world position by view-projection matrix
-        let clip_pos = self.view_projection * glam::Vec4::new(world_pos.x, world_pos.y, 0.0, 1.0);
-        
-        // Convert from normalized device coordinates to screen coordinates
-        let screen_x = (clip_pos.x + 1.0) * 0.5 * self.viewport_width;
-        let screen_y = (clip_pos.y + 1.0) * 0.5 * self.viewport_height;
-        
-        Vec2::new(screen_x, screen_y)
     }
 
     // Internal matrix calculation
@@ -182,6 +108,83 @@ impl Camera2D {
         // Combine into view-projection matrix
         self.view_projection = projection * view;
         self.transform_dirty = false;
+    }
+    
+}
+
+impl Camera2D {
+    // Coordinate conversion methods (useful for mouse interaction)
+    pub fn screen_to_world(&mut self, screen_pos: Vec2) -> Vec2 {
+        if self.transform_dirty {
+            self.update_matrices();
+        }
+        
+        // Convert screen coordinates to normalized device coordinates (-1 to 1)
+        let ndc_x = (screen_pos.x / self.viewport_width) * 2.0 - 1.0;
+        let ndc_y = -((screen_pos.y / self.viewport_height) * 2.0 - 1.0);  // ADD negative sign here
+        
+        // Transform by inverse view-projection matrix
+        let inverse_vp = self.view_projection.inverse();
+        let world_pos_4d = inverse_vp * glam::Vec4::new(ndc_x, ndc_y, 0.0, 1.0);
+        
+        Vec2::new(world_pos_4d.x, world_pos_4d.y)
+    }
+
+    pub fn world_to_screen(&mut self, world_pos: Vec2) -> Vec2 {
+        if self.transform_dirty {
+            self.update_matrices();
+        }
+        
+        // Transform world position by view-projection matrix
+        let clip_pos = self.view_projection * glam::Vec4::new(world_pos.x, world_pos.y, 0.0, 1.0);
+        
+        // Convert from normalized device coordinates to screen coordinates
+        let screen_x = (clip_pos.x + 1.0) * 0.5 * self.viewport_width;
+        let screen_y = (clip_pos.y + 1.0) * 0.5 * self.viewport_height;
+        
+        Vec2::new(screen_x, screen_y)
+    }
+
+    pub fn set_position(&mut self, position: Vec2) {
+        if self.position != position {
+            self.position = position;
+            self.transform_dirty = true;
+        }
+    }
+
+    pub fn set_zoom(&mut self, zoom: f32) {
+        let clamped_zoom = zoom.max(0.1).min(10.0); // Reasonable zoom limits
+        if self.zoom != clamped_zoom {
+            self.zoom = clamped_zoom;
+            self.transform_dirty = true;
+        }
+    }
+
+    pub fn set_rotation(&mut self, rotation: f32) {
+        if self.rotation != rotation {
+            self.rotation = rotation;
+            self.transform_dirty = true;
+        }
+    }
+
+    // Game calls this to trigger shake
+    pub fn add_shake(&mut self, intensity: f32, duration: f32) {
+        self.shake_intensity = intensity;
+        self.shake_duration = duration;
+        self.shake_timer = duration;
+    }
+
+    // Camera movement methods
+    pub fn move_by(&mut self, delta: Vec2) {
+        self.set_position(self.position + delta);
+    }
+
+    pub fn zoom_by(&mut self, delta: f32) {
+        self.set_zoom(self.zoom + delta);
+    }
+
+    pub fn rotate_by(&mut self, delta: f32) {
+        self.set_rotation(self.rotation + delta);
     }
 
     // Query methods

@@ -1,17 +1,17 @@
-# rust_clog
+# Rusty Clog
 Rust Sokol Game engine
 
 ## Technologies Used
-Rust
+Rust  
 Sokol
 
 ## Using the App
 Clone the repository then start the app from root using cargo.
-
+  
 ```bash
 ...\rusclog>cargo run
 ```
-
+  
 The test game will start running.
 
 ## Upcoming Changes

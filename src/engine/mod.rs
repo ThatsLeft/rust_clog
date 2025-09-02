@@ -5,9 +5,9 @@ pub mod camera;
 
 use sokol::gfx as sg;
 pub use app::*;
-pub use graphics::*;
 pub use input::*;
 pub use camera::*;
+pub use graphics::*;
 
 #[derive(Clone)]
 pub struct GameConfig {
@@ -63,11 +63,11 @@ impl GameConfig {
 pub trait Game {
     fn config() -> GameConfig where Self: Sized;
 
-    fn init(&mut self, config: &GameConfig);
+    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer);
     fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D);
 
     fn render(&mut self);
-    fn render_with_renderer(&mut self, _renderer: &mut Renderer, camera: &mut Camera2D) {  // ADD THIS
+    fn render_with_renderer(&mut self, _renderer: &mut Renderer, camera: &mut Camera2D,) {  // ADD THIS
         self.render();  // Default: just call old render method
     }
 
