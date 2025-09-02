@@ -2,7 +2,7 @@ use sokol::gfx as sg;
 use glam::{Mat4, Vec2, Vec4};
 use std::{collections::HashMap, mem};
 
-use crate::engine::Camera2D;
+use crate::engine::{AnimationState, Camera2D};
 
 #[repr(C)]
 struct Vertex {
@@ -57,7 +57,7 @@ impl Circle {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct Sprite {
     pub position: Vec2,
     pub size: Vec2,
@@ -65,6 +65,7 @@ pub struct Sprite {
     pub color: Vec4,               
     pub rotation: f32,
     pub texture: Option<sg::Image>,
+    pub animation_state: Option<AnimationState>,
 }
 
 impl Sprite {
@@ -76,6 +77,7 @@ impl Sprite {
             color: Vec4::ONE,
             rotation: 0.0,
             texture: None,
+            animation_state: None,
         }
     }
 

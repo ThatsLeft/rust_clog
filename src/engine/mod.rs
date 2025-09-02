@@ -2,12 +2,16 @@ pub mod app;
 pub mod graphics;
 pub mod input;
 pub mod camera;
+pub mod animation;
+pub mod collision;
 
 use sokol::gfx as sg;
 pub use app::*;
 pub use input::*;
 pub use camera::*;
 pub use graphics::*;
+pub use animation::*;
+pub use collision::*;
 
 #[derive(Clone)]
 pub struct GameConfig {

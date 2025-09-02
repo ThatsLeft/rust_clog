@@ -2,7 +2,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use glam::{Vec2, Vec4};
 use sokol::{app as sapp, gfx as sg};
-use crate::engine::{Camera2D, Circle, Game, GameConfig, InputManager, Quad, Renderer, Sprite};
+use crate::engine::{check_collision, AnimationManager, Camera2D, Circle, Collider, Game, GameConfig, InputManager, Quad, Renderer, Sprite, SpriteAnimations};
 
 pub struct TestGame {
     frame_count: u64,
@@ -14,6 +14,7 @@ pub struct TestGame {
     current_texture_name: String,
     texture_names: Vec<String>,
     current_texture_index: usize,
+    animation_manager: AnimationManager,
 }
 
 impl TestGame {
@@ -34,20 +35,22 @@ impl TestGame {
         Self {
             frame_count: 0,
             current_background: sg::Color { r: 0.0, g: 0.4, b: 0.7, a: 1.0 },
-            my_box: Quad::new(0.0, 0.0, 100.0, 50.0, Vec4::new(1.0, 0.0, 0.0, 1.0)), // Start at origin
+            my_box: Quad::new(-500.0, 0.0, 100.0, 50.0, Vec4::new(1.0, 0.0, 0.0, 1.0)), // Start at origin
             my_circle: Circle::new(200.0, 200.0, 75.0, Vec4::new(0.0, 1.0, 0.0, 1.0)),
             world_boxes,
             test_sprite: Sprite::new()  // ADD THIS - starts as solid color
-                .with_position(Vec2::new(-200.0, -100.0))
-                .with_size(Vec2::new(128.0, 128.0))
+                .with_position(Vec2::new(-10.0, -100.0))
+                .with_size(Vec2::new(32.0, 32.0))
                 .with_color(Vec4::new(1.0, 0.5, 0.8, 1.0)),
                 current_texture_name: "player".to_string(),     // ADD
             texture_names: vec![                            // ADD
                 "player".to_string(),
                 "bullet".to_string(), 
-                "alien".to_string()
+                "alien".to_string(),
+                "ship_thruster_spritesheet".to_string()
             ],
             current_texture_index: 0,
+            animation_manager: AnimationManager::new(),
         }
     }
 
@@ -55,13 +58,60 @@ impl TestGame {
         let g = self.current_background.g + 0.01;
         self.current_background.g = if g > 1.0 { 0.0 } else { g };
     }
+
+    fn check_sprite_collisions(&self) -> bool {
+        let player_collider = self.get_player_collider();
+        let box_colliders = self.get_box_colliders();
+        
+        // Check collision with all world boxes
+        for box_collider in &box_colliders {
+            if check_collision(&player_collider, box_collider) {
+                return true;
+            }
+        }
+        
+        // Check collision with circle
+        let circle_collider = Collider::new_circle(
+            self.my_circle.center.x, 
+            self.my_circle.center.y, 
+            self.my_circle.radius
+        );
+        
+        if check_collision(&player_collider, &circle_collider) {
+            return true;
+        }
+        
+        false
+    }
+
+    fn get_player_collider(&self) -> Collider {
+        // Sprite position is already in world coordinates
+        Collider::new_rect(
+            self.test_sprite.position.x - self.test_sprite.size.x / 2.0,  // Center to top-left
+            self.test_sprite.position.y - self.test_sprite.size.y / 2.0,  // Center to top-left
+            self.test_sprite.size.x,
+            self.test_sprite.size.y
+        )
+    }
+    
+    fn get_box_colliders(&self) -> Vec<Collider> {
+        self.world_boxes.iter().map(|quad| {
+            // Quad positions are already in world coordinates, but may need centering adjustment
+            Collider::new_rect(
+                quad.position.x,  // Assuming quad.position is already top-left
+                quad.position.y, 
+                quad.size.x, 
+                quad.size.y
+            )
+        }).collect()
+    }
 }
 
 impl Game for TestGame {
     fn config() -> GameConfig {
         GameConfig::new()
             .with_title("My Awesome Test Game")
-            .with_size(1024, 768)
+            .with_size(1000, 800)
             .with_background(sg::Color { r: 0.6, g: 0.6, b: 0.6, a: 1.0 })
             .with_samples(4)
     }
@@ -80,6 +130,16 @@ impl Game for TestGame {
             }
         }
 
+        self.animation_manager.register_animation(SpriteAnimations {
+            name: "player_thruster".to_string(),
+            texture_name: "ship_thruster_spritesheet".to_string(),
+            frame_size: Vec2::new(32.0, 32.0),  // Assuming 32x32 frames
+            frame_count: 4,
+            frames_per_row: 4,
+            duration: 1.0,  // 1 second for full animation
+            looping: true,
+        });
+
         println!("Game initialized!");
         println!("Window size: {}x{}", sapp::width(), sapp::height());
 
@@ -87,12 +147,14 @@ impl Game for TestGame {
 
     fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D) {
         self.frame_count += 1;
+        let time: f32 = self.frame_count as f32 * dt;
         
         self.update_background_color();
 
-        let time: f32 = self.frame_count as f32 * dt;
-
         self.my_circle.radius = 75.0 + (time * 3.0).sin() * 25.0;
+
+
+        let old_position = self.test_sprite.position;
 
         // test
         // Move box with WASD
@@ -110,7 +172,21 @@ impl Game for TestGame {
             box_movement.x += 1.0;
         }
 
-        self.my_box.position += box_movement * 200.0 * dt;
+        if box_movement.length() > 0.0 {
+            let movement = box_movement.normalize() * 200.0 * dt;
+            self.test_sprite.position += movement;
+
+            // Calculate rotation based on movement direction
+            self.test_sprite.rotation = box_movement.y.atan2(box_movement.x) - std::f32::consts::PI / 2.0;
+            
+            // Check for collisions after movement
+            if self.check_sprite_collisions() {
+                // If collision detected, revert to old position but keep rotation
+                self.test_sprite.position = old_position;
+                println!("Collision detected! Movement blocked.");
+            }
+        
+        }
         
         // Move circle with arrow keys (just for demonstration)
         let mut circle_movement = Vec2::ZERO;
@@ -219,10 +295,23 @@ impl Game for TestGame {
         
         // sprite changing
         if input.is_key_pressed(sapp::Keycode::Enter) {
+            // self.current_texture_index = (self.current_texture_index + 1) % self.texture_names.len();
+            // self.current_texture_name = self.texture_names[self.current_texture_index].clone();
+            // println!("Switched to texture: {}", self.current_texture_name);
             self.current_texture_index = (self.current_texture_index + 1) % self.texture_names.len();
             self.current_texture_name = self.texture_names[self.current_texture_index].clone();
+            
+            // Start animation if switching to player
+            if self.current_texture_name == "ship_thruster_spritesheet" {
+                self.animation_manager.play_animation(&mut self.test_sprite, "player_thruster");
+            }
+            
             println!("Switched to texture: {}", self.current_texture_name);
+            
         }
+
+        //animation
+        self.animation_manager.update_sprite_animation(&mut self.test_sprite, dt);
 
         if self.frame_count % 60 == 0 {
             println!("FPS: {:.1} | Camera: pos({:.0}, {:.0}) zoom({:.2}) rot({:.2})", 
