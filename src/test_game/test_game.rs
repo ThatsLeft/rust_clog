@@ -59,14 +59,14 @@ impl TestGame {
         self.current_background.g = if g > 1.0 { 0.0 } else { g };
     }
 
-    fn check_sprite_collisions(&self) -> bool {
+    fn check_sprite_collisions(&self) -> Option<usize> {
         let player_collider = self.get_player_collider();
         let box_colliders = self.get_box_colliders();
         
         // Check collision with all world boxes
-        for box_collider in &box_colliders {
+        for (index, box_collider) in box_colliders.iter().enumerate() {
             if check_collision(&player_collider, box_collider) {
-                return true;
+                return Some(index);
             }
         }
         
@@ -78,10 +78,11 @@ impl TestGame {
         );
         
         if check_collision(&player_collider, &circle_collider) {
-            return true;
+            println!("Hit circle");
+            return None;
         }
         
-        false
+        None
     }
 
     fn get_player_collider(&self) -> Collider {
@@ -174,18 +175,20 @@ impl Game for TestGame {
 
         if box_movement.length() > 0.0 {
             let movement = box_movement.normalize() * 200.0 * dt;
+            // let old_position = self.test_sprite.position;
             self.test_sprite.position += movement;
-
-            // Calculate rotation based on movement direction
+        
+            // Calculate rotation
             self.test_sprite.rotation = box_movement.y.atan2(box_movement.x) - std::f32::consts::PI / 2.0;
             
-            // Check for collisions after movement
-            if self.check_sprite_collisions() {
-                // If collision detected, revert to old position but keep rotation
-                self.test_sprite.position = old_position;
-                println!("Collision detected! Movement blocked.");
+            // Check for collisions
+            if let Some(hit_box_index) = self.check_sprite_collisions() {
+                // Remove the hit box
+                self.world_boxes.remove(hit_box_index);
+                println!("Box collected! {} boxes remaining", self.world_boxes.len());
+                
+                // Don't revert position - allow player to move through the collected box
             }
-        
         }
         
         // Move circle with arrow keys (just for demonstration)
