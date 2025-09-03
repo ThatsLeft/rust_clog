@@ -1,8 +1,8 @@
 use sokol::gfx as sg;
-use glam::{Mat4, Vec2, Vec4};
-use std::{collections::HashMap, mem};
+use glam::{Vec2, Vec4};
+use std::{collections::HashMap, mem, string};
 
-use crate::engine::{AnimationState, Camera2D};
+use crate::engine::{texture, AnimationState, Camera2D, Particle, TextureManager};
 
 #[repr(C)]
 struct Vertex {
@@ -65,7 +65,10 @@ pub struct Sprite {
     pub color: Vec4,               
     pub rotation: f32,
     pub texture: Option<sg::Image>,
+    pub texture_name: String,
     pub animation_state: Option<AnimationState>,
+    pub flip_x: bool,
+    pub flip_y: bool, 
 }
 
 impl Sprite {
@@ -77,12 +80,21 @@ impl Sprite {
             color: Vec4::ONE,
             rotation: 0.0,
             texture: None,
+            texture_name: String::new(),
             animation_state: None,
+            flip_x: false,
+            flip_y: false,
         }
     }
 
-    pub fn with_texture(mut self, texture: sg::Image) -> Self {
+    pub fn with_texture(mut self, texture_name: String, texture: sg::Image) -> Self {
         self.texture = Some(texture);
+        self.texture_name = texture_name;
+        self
+    }
+
+    pub fn with_texture_name(mut self, texture_name: String) -> Self {
+        self.texture_name = texture_name;
         self
     }
 
@@ -110,72 +122,19 @@ impl Sprite {
         self.uv = uv;
         self
     }
-}
 
-pub struct TextureManager {
-    textures: HashMap<String, sg::Image>,
-    white_texture: sg::Image,
-}
-
-impl TextureManager {
-    pub fn new() -> Self {
-        Self {
-            textures: HashMap::new(),
-            white_texture: sg::Image::default(),
-        }
+    pub fn with_flip_x(mut self, flip: bool) -> Self {
+        self.flip_x = flip;
+        self
     }
 
-    pub fn init(&mut self) {
-        let white_pixels = [255u8, 255, 255, 255];
-        self.white_texture = sg::make_image(&sg::ImageDesc {
-            width: 1,
-            height: 1,
-            data: sg::ImageData {
-                subimage: [[sg::Range {
-                    ptr: white_pixels.as_ref().as_ptr() as *const _,
-                    size: white_pixels.as_ref().len(),
-                }; 16]; 6],
-            },
-            ..Default::default()
-        });
+    pub fn with_flip_y(mut self, flip: bool) -> Self {
+        self.flip_y = flip;
+        self
     }
 
-    pub fn load_texture(&mut self, name: &str, path: &str) -> Result<sg::Image, Box<dyn std::error::Error>> {
-        // Check if already loaded
-        if let Some(&texture) = self.textures.get(name) {
-            return Ok(texture);
-        }
-
-        // Load image file
-        let img = image::open(path)?;
-        let rgba = img.to_rgba8();
-        let (width, height) = rgba.dimensions();
-
-        // Create sokol texture
-        let sg_texture = sg::make_image(&sg::ImageDesc {
-            width: width as i32,
-            height: height as i32,
-            pixel_format: sg::PixelFormat::Rgba8,
-            data: sg::ImageData {
-                subimage: [[sg::Range {
-                    ptr: rgba.as_raw().as_ptr() as *const _,
-                    size: rgba.as_raw().len(),
-                }; 16]; 6],
-            },
-            ..Default::default()
-        });
-
-        // Store in cache
-        self.textures.insert(name.to_string(), sg_texture);
-        Ok(sg_texture)
-    }
-
-    pub fn get_texture(&self, name: &str) -> Option<sg::Image> {
-        self.textures.get(name).copied()
-    }
-
-    pub fn get_white_texture(&self) -> sg::Image {
-        self.white_texture
+    pub fn change_texture(&mut self, texture_name: String) {
+        self.texture_name = texture_name;
     }
 }
 
@@ -746,7 +705,7 @@ float4 main(ps_in inp) : SV_Target0 {
         // Draw all batches
         for batch in &self.batches {
             // Select pipeline based on whether we're using textures
-            let uses_texture = batch.texture.id != self.texture_manager.white_texture.id;
+            let uses_texture = batch.texture.id != self.texture_manager.get_white_texture().id;
             let pipeline = if uses_texture {
                 self.textured_pipeline
             } else {
@@ -831,7 +790,7 @@ impl Renderer {
         
         self.indices.extend_from_slice(&indices);
 
-        self.add_batch(self.texture_manager.white_texture, start_index, 6);
+        self.add_batch(self.texture_manager.get_white_texture(), start_index, 6);
     }
 
     pub fn draw_circle(&mut self, circle: &Circle) {
@@ -869,7 +828,7 @@ impl Renderer {
             ]);
         }
 
-        self.add_batch(self.texture_manager.white_texture, center_vertex as usize, triangle_count as usize);
+        self.add_batch(self.texture_manager.get_white_texture(), center_vertex as usize, triangle_count as usize);
     }
 
     pub fn draw_sprite(&mut self, sprite: &Sprite) {
@@ -877,7 +836,8 @@ impl Renderer {
         let start_index = self.indices.len();
 
         // Determine which texture to use
-        let texture = sprite.texture.unwrap_or(self.texture_manager.white_texture);
+        // let texture = sprite.texture.unwrap_or(self.texture_manager.get_white_texture());
+        let texture = self.get_texture(&sprite.texture_name).unwrap_or(self.texture_manager.get_white_texture());
         
         // Create 4 vertices for the sprite quad
         let half_size = sprite.size * 0.5;
@@ -891,12 +851,22 @@ impl Renderer {
             Vec2::new(-half_size.x, half_size.y),  // Bottom-left
         ];
 
-        let uvs = [
+        let mut uvs = [
             Vec2::new(sprite.uv.x, sprite.uv.y),                           // Top-left UV
             Vec2::new(sprite.uv.x + sprite.uv.z, sprite.uv.y),           // Top-right UV
             Vec2::new(sprite.uv.x + sprite.uv.z, sprite.uv.y + sprite.uv.w), // Bottom-right UV
             Vec2::new(sprite.uv.x, sprite.uv.y + sprite.uv.w),           // Bottom-left UV
         ];
+
+        // Apply flipping by swapping UV coordinates
+        if sprite.flip_x {
+            uvs.swap(0, 1); // Swap top-left with top-right
+            uvs.swap(2, 3); // Swap bottom-right with bottom-left
+        }
+        if sprite.flip_y {
+            uvs.swap(0, 3); // Swap top-left with bottom-left
+            uvs.swap(1, 2); // Swap top-right with bottom-right
+        }
 
         let color = [sprite.color.x, sprite.color.y, sprite.color.z, sprite.color.w];
 
@@ -940,6 +910,20 @@ impl Renderer {
 
     pub fn get_texture(&self, name: &str) -> Option<sg::Image> {
         self.texture_manager.get_texture(name)
+    }
+
+    pub fn draw_particle(&mut self, particle: &Particle) {
+        let size = 4.0; // Small particle size
+        let alpha = particle.lifetime / particle.max_lifetime; // Fade out
+        let color = Vec4::new(particle.color.x, particle.color.y, particle.color.z, alpha);
+        
+        let quad = Quad::new(
+            particle.position.x - size * 0.5,
+            particle.position.y - size * 0.5,
+            size, size,
+            color
+        );
+        self.draw_quad(&quad);
     }
 
 }

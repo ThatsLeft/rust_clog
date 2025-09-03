@@ -95,4 +95,14 @@ impl AnimationManager {
     pub fn register_animation(&mut self, animation: SpriteAnimations) {
         self.animations.insert(animation.name.clone(), animation);
     }
+
+    pub fn stop_animation(&self, sprite: &mut Sprite) {
+        if let Some(ref mut anim_state) = sprite.animation_state {
+            anim_state.is_playing = false;
+        }
+    }
+
+    pub fn clear_animation(&self, sprite: &mut Sprite) {
+        sprite.animation_state = None;
+    }
 }

@@ -1,6 +1,6 @@
 use sokol::{app as sapp, gfx as sg, glue as sglue};
 use std::ffi::{self, CString};
-use crate::engine::{Camera2D, Game, GameConfig, InputManager, Renderer};
+use crate::engine::{AnimationManager, Camera2D, Game, GameConfig, InputManager, ParticleSystem, Renderer};
 
 pub struct App<T: Game> {
     game: T,
@@ -14,6 +14,8 @@ struct AppState<T: Game> {
     renderer: Renderer,
     input: InputManager,
     camera: Camera2D,
+    animation_manager: AnimationManager,
+    particle_systems: Vec<ParticleSystem>
 }
 
 impl<T: Game> App<T> {
@@ -44,6 +46,8 @@ impl<T: Game> App<T> {
             renderer: Renderer::new(),
             input: InputManager::new(),
             camera: Camera2D::new(),
+            animation_manager: AnimationManager::new(),
+            particle_systems: Vec::new(),
         });
 
         let user_data = Box::into_raw(state) as *mut ffi::c_void;
@@ -126,7 +130,7 @@ extern "C" fn init<T: Game>(user_data: *mut ffi::c_void) {
 
     // Let the game do its initialization
     let config = T::config();
-    state.game.init(&config, &mut state.renderer);
+    state.game.init(&config, &mut state.renderer, &mut state.animation_manager);
 }
 
 extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
@@ -134,8 +138,12 @@ extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
 
     let dt = sapp::frame_duration() as f32;
     
+    for system in &mut state.particle_systems {
+        system.update(dt);
+    }
+
     // Update game logic
-    state.game.update(dt, &state.input, &mut state.camera);
+    state.game.update(dt, &state.input, &mut state.camera, &mut state.animation_manager, &mut state.particle_systems);
 
     // UPDATE: Add camera shake update
     state.camera.update_shake(dt);
@@ -156,7 +164,7 @@ extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
     });
 
     // Let the game render
-    state.game.render_with_renderer(&mut state.renderer, &mut state.camera);  // CHANGED
+    state.game.render(&mut state.renderer, &mut state.camera, &mut state.particle_systems);  // CHANGED
     
     // Flush renderer
     state.renderer.flush(&mut state.camera);

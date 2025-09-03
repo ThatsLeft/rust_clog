@@ -4,6 +4,8 @@ pub mod input;
 pub mod camera;
 pub mod animation;
 pub mod collision;
+pub mod texture;
+pub mod particle;
 
 use sokol::gfx as sg;
 pub use app::*;
@@ -12,6 +14,8 @@ pub use camera::*;
 pub use graphics::*;
 pub use animation::*;
 pub use collision::*;
+pub use texture::*;
+pub use particle::*;
 
 #[derive(Clone)]
 pub struct GameConfig {
@@ -61,19 +65,21 @@ impl GameConfig {
         self.sample_count = samples;
         self
     }
+
+    pub fn with_high_dpi(mut self, high_dpi: bool) -> Self {
+        self.high_dpi = high_dpi;
+        self
+    }
 }
 
 // Trait that games must implement
 pub trait Game {
     fn config() -> GameConfig where Self: Sized;
 
-    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer);
-    fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D);
+    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer, animation_manager: &mut AnimationManager);
+    fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D, animation_manager: &mut AnimationManager, particle_systems: &mut Vec<ParticleSystem>);
 
-    fn render(&mut self);
-    fn render_with_renderer(&mut self, _renderer: &mut Renderer, camera: &mut Camera2D,) {  // ADD THIS
-        self.render();  // Default: just call old render method
-    }
+    fn render(&mut self, _renderer: &mut Renderer, camera: &mut Camera2D, particle_systems: &mut Vec<ParticleSystem>);
 
     fn handle_event(&mut self, event: &sokol::app::Event);
 

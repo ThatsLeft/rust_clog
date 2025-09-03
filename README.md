@@ -50,6 +50,20 @@ The test game will start running.
 - [ ] Animation events/callbacks
 - [ ] Animation looping modes (once, loop, ping-pong)
 
+### Particle system
+- [x] Particle struct
+- [x] ParticleSystem struct
+- [x] Particle physics update
+- [x] Particle Emission logic
+- [x] Particle Render integration
+- [x] Cleanup
+- [ ] Emitter shape
+- [ ] Physics forces
+- [ ] Size and scale
+- [ ] Texture support
+- [ ] Particle pooling
+- [ ] Performance optimization (GPU compute shaders, instanced rendering)
+
 ### Collision
 - [x] AABB-AABB collision detection
 - [x] Circle-Circle collision detection
@@ -102,3 +116,4 @@ The test game will start running.
 - [ ] Random number generation
 - [ ] Configuration file loading
 - [ ] Logging system
+- [ ] Debug utilities

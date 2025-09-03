@@ -2,7 +2,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use glam::{Vec2, Vec4};
 use sokol::{app as sapp, gfx as sg};
-use crate::engine::{check_collision, AnimationManager, Camera2D, Circle, Collider, Game, GameConfig, InputManager, Quad, Renderer, Sprite, SpriteAnimations};
+use crate::engine::{check_collision, check_collision_with_point, AnimationManager, Camera2D, Circle, Collider, Game, GameConfig, InputManager, ParticleSystem, Quad, Renderer, Sprite, SpriteAnimations};
 
 pub struct TestGame {
     frame_count: u64,
@@ -11,18 +11,22 @@ pub struct TestGame {
     my_circle: Circle,
     world_boxes: Vec<Quad>,
     test_sprite: Sprite,
-    current_texture_name: String,
     texture_names: Vec<String>,
-    current_texture_index: usize,
-    animation_manager: AnimationManager,
 }
 
+// Functions and functionality for the test game
 impl TestGame {
     pub fn new() -> Self {
         let mut world_boxes = Vec::new();
         for i in 0..20 {
-            let x = (i as f32 * 200.0) % 2000.0 - 1000.0; // Spread from -1000 to 1000
-            let y = (i as f32 * 150.0) % 1500.0 - 750.0;  // Spread from -750 to 750
+            
+            let mut hasher = DefaultHasher::new();
+            (i as u64).hash(&mut hasher);
+            let seed = hasher.finish();
+            
+            let x = ((seed & 0xFFFF) as f32 / 65535.0) * 2000.0 - 1000.0;  // Random from -1000 to 1000
+            let y = (((seed >> 16) & 0xFFFF) as f32 / 65535.0) * 1500.0 - 750.0;  // Random from -750 to 750
+            
             let color = match i % 4 {
                 0 => Vec4::new(1.0, 0.5, 0.0, 1.0), // Orange
                 1 => Vec4::new(0.5, 0.0, 1.0, 1.0), // Purple  
@@ -41,16 +45,15 @@ impl TestGame {
             test_sprite: Sprite::new()  // ADD THIS - starts as solid color
                 .with_position(Vec2::new(-10.0, -100.0))
                 .with_size(Vec2::new(32.0, 32.0))
-                .with_color(Vec4::new(1.0, 0.5, 0.8, 1.0)),
-                current_texture_name: "player".to_string(),     // ADD
-            texture_names: vec![                            // ADD
+                .with_color(Vec4::new(1.0, 0.5, 0.8, 1.0))
+                .with_texture_name("player".to_string())
+                .with_flip_y(true),
+            texture_names: vec![
                 "player".to_string(),
                 "bullet".to_string(), 
                 "alien".to_string(),
                 "ship_thruster_spritesheet".to_string()
             ],
-            current_texture_index: 0,
-            animation_manager: AnimationManager::new(),
         }
     }
 
@@ -59,17 +62,23 @@ impl TestGame {
         self.current_background.g = if g > 1.0 { 0.0 } else { g };
     }
 
-    fn check_sprite_collisions(&self) -> Option<usize> {
+    fn check_sprite_collisions(&self) -> Option<(usize, Vec2)> {
         let player_collider = self.get_player_collider();
-        let box_colliders = self.get_box_colliders();
-        
+        let single_box_colliders = self.get_single_box_collider();
+
         // Check collision with all world boxes
-        for (index, box_collider) in box_colliders.iter().enumerate() {
-            if check_collision(&player_collider, box_collider) {
-                return Some(index);
+        for (index, box_collider) in self.get_box_colliders().iter().enumerate() {
+            let result = check_collision_with_point(&player_collider, box_collider);
+            if result.collided {
+                return Some((index, result.contact_point));
             }
         }
-        
+
+        if check_collision(&player_collider, &single_box_colliders) {
+            println!("Hit my box");
+            return None;
+        }
+
         // Check collision with circle
         let circle_collider = Collider::new_circle(
             self.my_circle.center.x, 
@@ -88,18 +97,26 @@ impl TestGame {
     fn get_player_collider(&self) -> Collider {
         // Sprite position is already in world coordinates
         Collider::new_rect(
-            self.test_sprite.position.x - self.test_sprite.size.x / 2.0,  // Center to top-left
-            self.test_sprite.position.y - self.test_sprite.size.y / 2.0,  // Center to top-left
+            self.test_sprite.position.x - self.test_sprite.size.x / 2.0,
+            self.test_sprite.position.y - self.test_sprite.size.y / 2.0,
             self.test_sprite.size.x,
             self.test_sprite.size.y
         )
     }
+
+    fn get_single_box_collider(&self) -> Collider {
+        Collider::new_rect(
+                self.my_box.position.x,
+                self.my_box.position.y,
+                self.my_box.size.x,
+                self.my_box.size.y,
+            )
+    }
     
     fn get_box_colliders(&self) -> Vec<Collider> {
         self.world_boxes.iter().map(|quad| {
-            // Quad positions are already in world coordinates, but may need centering adjustment
             Collider::new_rect(
-                quad.position.x,  // Assuming quad.position is already top-left
+                quad.position.x,
                 quad.position.y, 
                 quad.size.x, 
                 quad.size.y
@@ -108,6 +125,11 @@ impl TestGame {
     }
 }
 
+/// Implement the Game aspect for the TestGame
+/// init the game
+/// update the game loop
+/// render the game objects
+/// handle_event handle events from the window not related to movement
 impl Game for TestGame {
     fn config() -> GameConfig {
         GameConfig::new()
@@ -115,9 +137,10 @@ impl Game for TestGame {
             .with_size(1000, 800)
             .with_background(sg::Color { r: 0.6, g: 0.6, b: 0.6, a: 1.0 })
             .with_samples(4)
+            .with_high_dpi(true)
     }
     
-    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer) {
+    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer, animation_manager: &mut AnimationManager) {
 
         self.current_background = config.background_color;
         
@@ -131,7 +154,7 @@ impl Game for TestGame {
             }
         }
 
-        self.animation_manager.register_animation(SpriteAnimations {
+        animation_manager.register_animation(SpriteAnimations {
             name: "player_thruster".to_string(),
             texture_name: "ship_thruster_spritesheet".to_string(),
             frame_size: Vec2::new(32.0, 32.0),  // Assuming 32x32 frames
@@ -146,7 +169,7 @@ impl Game for TestGame {
 
     }
 
-    fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D) {
+    fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D, animation_manager: &mut AnimationManager, particle_systems: &mut Vec<ParticleSystem>) {
         self.frame_count += 1;
         let time: f32 = self.frame_count as f32 * dt;
         
@@ -182,7 +205,11 @@ impl Game for TestGame {
             self.test_sprite.rotation = box_movement.y.atan2(box_movement.x) - std::f32::consts::PI / 2.0;
             
             // Check for collisions
-            if let Some(hit_box_index) = self.check_sprite_collisions() {
+            if let Some((hit_box_index, collision_point)) = self.check_sprite_collisions() {
+                let explosion = ParticleSystem::new(collision_point, 80.0, 0.2, 0.5); // 50 particles per second
+                camera.add_shake(5.0, 0.2);
+                particle_systems.push(explosion);
+
                 // Remove the hit box
                 self.world_boxes.remove(hit_box_index);
                 println!("Box collected! {} boxes remaining", self.world_boxes.len());
@@ -298,23 +325,30 @@ impl Game for TestGame {
         
         // sprite changing
         if input.is_key_pressed(sapp::Keycode::Enter) {
-            // self.current_texture_index = (self.current_texture_index + 1) % self.texture_names.len();
-            // self.current_texture_name = self.texture_names[self.current_texture_index].clone();
-            // println!("Switched to texture: {}", self.current_texture_name);
-            self.current_texture_index = (self.current_texture_index + 1) % self.texture_names.len();
-            self.current_texture_name = self.texture_names[self.current_texture_index].clone();
-            
+
+            let next_texture_id = self.texture_names.iter().position(|s| s == &self.test_sprite.texture_name).unwrap_or(0);
+            let next_texture = self.texture_names[(next_texture_id+1)% self.texture_names.len()].clone();
+
             // Start animation if switching to player
-            if self.current_texture_name == "ship_thruster_spritesheet" {
-                self.animation_manager.play_animation(&mut self.test_sprite, "player_thruster");
+            self.test_sprite.change_texture(next_texture);
+
+            if self.test_sprite.texture_name == "ship_thruster_spritesheet" {
+                self.test_sprite.flip_y = false;
+                animation_manager.play_animation(&mut self.test_sprite, "player_thruster");
+            } else {
+                animation_manager.stop_animation(&mut self.test_sprite);
+                animation_manager.clear_animation(&mut self.test_sprite);
+
+                self.test_sprite.size = Vec2::new(32.0, 32.0);  // ADD THIS
+                self.test_sprite.uv = Vec4::new(0.0, 0.0, 1.0, 1.0); 
             }
             
-            println!("Switched to texture: {}", self.current_texture_name);
+            println!("Switched to texture: {}", self.test_sprite.texture_name);
             
         }
 
         //animation
-        self.animation_manager.update_sprite_animation(&mut self.test_sprite, dt);
+        animation_manager.update_sprite_animation(&mut self.test_sprite, dt);
 
         if self.frame_count % 60 == 0 {
             println!("FPS: {:.1} | Camera: pos({:.0}, {:.0}) zoom({:.2}) rot({:.2})", 
@@ -324,12 +358,7 @@ impl Game for TestGame {
         }
     }
 
-    fn render(&mut self) {
-        // Nothing to render yet - the pass_action in the engine handles clearing
-        // Future sprite rendering will go here
-    }
-
-    fn render_with_renderer(&mut self, renderer: &mut Renderer, camera: &mut Camera2D) {
+    fn render(&mut self, renderer: &mut Renderer, camera: &mut Camera2D, particle_systems: &mut Vec<ParticleSystem>) {
         // Game responsibility: Decide what to draw
         
         renderer.begin_frame();
@@ -341,8 +370,13 @@ impl Game for TestGame {
         renderer.draw_quad(&self.my_box);
         renderer.draw_circle(&self.my_circle);
         
-        self.test_sprite.texture = renderer.get_texture(&self.current_texture_name);
         renderer.draw_sprite(&self.test_sprite);
+        
+        for system in particle_systems {
+            for particle in &system.particles {
+                renderer.draw_particle(particle);
+            }
+        }
     }
 
     // handle events that are not movement based

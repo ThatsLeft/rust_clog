@@ -8,3 +8,4 @@ authors = ["Thomas Mannsverk Eliassen"]
 glam = "0.30.5"
 sokol = { version="*", git="https://github.com/floooh/sokol-rust.git" }
 image = "0.24"
+rand = "0.9.2"

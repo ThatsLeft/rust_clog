@@ -13,6 +13,22 @@ pub struct Collider {
     pub is_trigger: bool,  // If true, detects collision but doesn't block movement
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct CollisionResult {
+    pub collided: bool,
+    pub contact_point: Vec2,
+}
+
+impl CollisionResult {
+    pub fn none() -> Self {
+        Self { collided: false, contact_point: Vec2::ZERO }
+    }
+    
+    pub fn hit(point: Vec2) -> Self {
+        Self { collided: true, contact_point: point }
+    }
+}
+
 impl Collider {
     pub fn new_rect(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
@@ -53,6 +69,27 @@ pub fn check_collision(a: &Collider, b: &Collider) -> bool {
     }
 }
 
+pub fn check_collision_with_point(a: &Collider, b: &Collider) -> CollisionResult {
+    match (&a.shape, &b.shape) {
+        (CollisionShape::Rectangle { width: w1, height: h1 },
+         CollisionShape::Rectangle { width: w2, height: h2 }) => {
+            aabb_vs_aabb_with_point(a.position, *w1, *h1, b.position, *w2, *h2)
+        },
+        (CollisionShape::Circle { radius: r1 },
+         CollisionShape::Circle { radius: r2 }) => {
+            circle_vs_circle_with_point(a.position, *r1, b.position, *r2)
+        },
+        (CollisionShape::Rectangle { width, height }, 
+         CollisionShape::Circle { radius }) => {
+            aabb_vs_circle_with_point(a.position, *width, *height, b.position, *radius)
+        },
+        (CollisionShape::Circle { radius }, 
+         CollisionShape::Rectangle { width, height }) => {
+            aabb_vs_circle_with_point(b.position, *width, *height, a.position, *radius)
+        },
+    }
+}
+
 fn aabb_vs_aabb(pos1: Vec2, w1: f32, h1: f32, pos2: Vec2, w2: f32, h2: f32) -> bool {
     (pos1.x < pos2.x + w2) && 
     (pos1.x + w1 > pos2.x) && 
@@ -71,4 +108,53 @@ fn aabb_vs_circle(rect_pos: Vec2, width: f32, height: f32, circle_pos: Vec2, rad
     let closest_y = circle_pos.y.max(rect_pos.y).min(rect_pos.y + height);
     let distance_sq = (circle_pos - Vec2::new(closest_x, closest_y)).length_squared();
     distance_sq <= radius * radius
+}
+
+fn aabb_vs_aabb_with_point(pos1: Vec2, w1: f32, h1: f32, pos2: Vec2, w2: f32, h2: f32) -> CollisionResult {
+    let collided = (pos1.x < pos2.x + w2) &&
+                   (pos1.x + w1 > pos2.x) &&
+                   (pos1.y < pos2.y + h2) &&
+                   (pos1.y + h1 > pos2.y);
+    
+    if collided {
+        // Calculate overlap region center
+        let left = pos1.x.max(pos2.x);
+        let right = (pos1.x + w1).min(pos2.x + w2);
+        let top = pos1.y.max(pos2.y);
+        let bottom = (pos1.y + h1).min(pos2.y + h2);
+        
+        let contact_point = Vec2::new((left + right) * 0.5, (top + bottom) * 0.5);
+        CollisionResult::hit(contact_point)
+    } else {
+        CollisionResult::none()
+    }
+}
+
+fn circle_vs_circle_with_point(pos1: Vec2, r1: f32, pos2: Vec2, r2: f32) -> CollisionResult {
+    let distance_sq = (pos1 - pos2).length_squared();
+    let radius_sum = r1 + r2;
+    let collided = distance_sq <= radius_sum * radius_sum;
+    
+    if collided {
+        // Contact point is along the line between centers
+        let direction = (pos2 - pos1).normalize();
+        let contact_point = pos1 + direction * r1;
+        CollisionResult::hit(contact_point)
+    } else {
+        CollisionResult::none()
+    }
+}
+
+fn aabb_vs_circle_with_point(rect_pos: Vec2, width: f32, height: f32, circle_pos: Vec2, radius: f32) -> CollisionResult {
+    let closest_x = circle_pos.x.max(rect_pos.x).min(rect_pos.x + width);
+    let closest_y = circle_pos.y.max(rect_pos.y).min(rect_pos.y + height);
+    let closest_point = Vec2::new(closest_x, closest_y);
+    let distance_sq = (circle_pos - closest_point).length_squared();
+    let collided = distance_sq <= radius * radius;
+    
+    if collided {
+        CollisionResult::hit(closest_point)
+    } else {
+        CollisionResult::none()
+    }
 }
