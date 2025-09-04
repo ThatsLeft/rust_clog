@@ -1,6 +1,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use glam::{Vec2, Vec4};
+use rand::Rng;
 use sokol::{app as sapp, gfx as sg};
 use crate::engine::{check_collision, check_collision_with_point, AnimationManager, Camera2D, Circle, Collider, Game, GameConfig, InputManager, LoopType::Loop, ParticleSystem, Quad, Renderer, Sprite, SpriteAnimations};
 
@@ -18,14 +19,11 @@ pub struct TestGame {
 impl TestGame {
     pub fn new() -> Self {
         let mut world_boxes = Vec::new();
+        let mut rng = rand::rng();
+
         for i in 0..20 {
-            
-            let mut hasher = DefaultHasher::new();
-            (i as u64).hash(&mut hasher);
-            let seed = hasher.finish();
-            
-            let x = ((seed & 0xFFFF) as f32 / 65535.0) * 2000.0 - 1000.0;  // Random from -1000 to 1000
-            let y = (((seed >> 16) & 0xFFFF) as f32 / 65535.0) * 1500.0 - 750.0;  // Random from -750 to 750
+            let x = rng.random_range(-1000.0..=1000.0);
+            let y = rng.random_range(-750.0..=750.0);
             
             let color = match i % 4 {
                 0 => Vec4::new(1.0, 0.5, 0.0, 1.0), // Orange
@@ -33,13 +31,14 @@ impl TestGame {
                 2 => Vec4::new(0.0, 1.0, 1.0, 1.0), // Cyan
                 _ => Vec4::new(1.0, 1.0, 0.0, 1.0), // Yellow
             };
+            
             world_boxes.push(Quad::new(x, y, 80.0, 60.0, color));
         }
 
         Self {
             frame_count: 0,
             current_background: sg::Color { r: 0.0, g: 0.4, b: 0.7, a: 1.0 },
-            my_box: Quad::new(-500.0, 0.0, 100.0, 50.0, Vec4::new(1.0, 0.0, 0.0, 1.0)), // Start at origin
+            my_box: Quad::new(-500.0, 0.0, 100.0, 50.0, Vec4::new(1.0, 0.0, 0.0, 1.0)).with_outline(2.5), // Start at origin
             my_circle: Circle::new(200.0, 200.0, 75.0, Vec4::new(0.0, 1.0, 0.0, 1.0)),
             world_boxes,
             test_sprite: Sprite::new()  // ADD THIS - starts as solid color
@@ -162,17 +161,7 @@ impl Game for TestGame {
             4, 
             1.0, 
             Loop,
-        )
-            // {
-            // name: "player_thruster".to_string(),
-            // texture_name: "ship_thruster_spritesheet".to_string(),
-            // frame_size: Vec2::new(32.0, 32.0),  // Assuming 32x32 frames
-            // frame_count: 4,
-            // frames_per_row: 4,
-            // duration: 1.0,  // 1 second for full animation
-            // looping: true,
-            // }
-        );
+        ));
 
         println!("Game initialized!");
         println!("Window size: {}x{}", sapp::width(), sapp::height());

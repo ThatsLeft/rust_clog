@@ -1,8 +1,8 @@
 use sokol::gfx as sg;
 use glam::{Vec2, Vec4};
-use std::{collections::HashMap, mem, string};
+use std::{collections::HashMap, mem};
 
-use crate::engine::{texture, AnimationState, Camera2D, Particle, TextureManager};
+use crate::engine::{AnimationState, Camera2D, Particle, TextureManager};
 
 #[repr(C)]
 struct Vertex {
@@ -16,11 +16,19 @@ struct Uniforms {
     mvp: [[f32; 4]; 4],
 }
 
+#[derive(Clone, Copy, Debug)]
+enum PrimitiveType {
+    Triangles,
+    Lines,
+}
+
 #[derive(Copy, Clone)]
 pub struct Quad {
     pub position: Vec2,
     pub size: Vec2,
     pub color: Vec4,
+    pub outline_only: bool,
+    pub outline_width: f32,
 }
 
 impl Quad {
@@ -29,7 +37,15 @@ impl Quad {
             position: Vec2::new(x, y),
             size: Vec2::new(width, height),
             color,
+            outline_only: false,
+            outline_width: 1.0,
         }
+    }
+
+    pub fn with_outline(mut self, outline_width: f32) -> Self {
+        self.outline_only = true;
+        self.outline_width = outline_width;
+        self
     }
 }
 
@@ -39,6 +55,8 @@ pub struct Circle {
     pub radius: f32,
     pub color: Vec4,
     pub segments: u32, // Number of triangles to approximate the circle
+    pub outline_only: bool,
+    pub outline_width: f32,
 }
 
 impl Circle {
@@ -47,10 +65,18 @@ impl Circle {
             center: Vec2::new(x, y),
             radius,
             color,
-            segments: 32, // Default to 32 segments for smooth appearance
+            segments: 32, // Default to 32 segments for smooth appearance,
+            outline_only: false,
+            outline_width: 1.0,
         }
     }
 
+    pub fn with_outline(mut self, outline_width: f32) -> Self {
+        self.outline_only = true;
+        self.outline_width = outline_width;
+        self
+    }
+    
     pub fn with_segments(mut self, segments: u32) -> Self {
         self.segments = segments.max(3); // Minimum 3 segments for a triangle
         self
@@ -142,11 +168,13 @@ struct DrawBatch {
     texture: sg::Image,
     start_index: usize,
     index_count: usize,
+    primitive_type: PrimitiveType
 }
 
 pub struct Renderer {
     textured_pipeline: sg::Pipeline,
     colored_pipeline: sg::Pipeline,
+    line_pipeline: sg::Pipeline,
     bind: sg::Bindings,
     vertices: Vec<Vertex>,
     indices: Vec<u16>,
@@ -165,6 +193,7 @@ impl Renderer {
         Self {
             textured_pipeline: sg::Pipeline::default(),
             colored_pipeline: sg::Pipeline::default(),
+            line_pipeline: sg::Pipeline::default(),
             bind: sg::Bindings::default(),
             vertices: Vec::new(),
             indices: Vec::new(),
@@ -585,6 +614,36 @@ float4 main(ps_in inp) : SV_Target0 {
             ..Default::default()
         });
 
+        self.line_pipeline = sg::make_pipeline(&sg::PipelineDesc {
+            shader: colored_shader,  // Reuse the same colored shader
+            layout: vertex_layout,   // Same vertex layout
+            index_type: sg::IndexType::Uint16,
+            primitive_type: sg::PrimitiveType::Lines,  // Only this changes
+            cull_mode: sg::CullMode::None,
+            depth: sg::DepthState {
+                write_enabled: false,
+                compare: sg::CompareFunc::Always,
+                ..Default::default()
+            },
+            colors: [
+                sg::ColorTargetState {
+                    blend: sg::BlendState {
+                        enabled: true,
+                        src_factor_rgb: sg::BlendFactor::SrcAlpha,
+                        dst_factor_rgb: sg::BlendFactor::OneMinusSrcAlpha,
+                        src_factor_alpha: sg::BlendFactor::One,
+                        dst_factor_alpha: sg::BlendFactor::OneMinusSrcAlpha,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                sg::ColorTargetState::default(),
+                sg::ColorTargetState::default(),
+                sg::ColorTargetState::default(),
+            ],
+            ..Default::default()
+        });
+
         let initial_vtx_count = 1000usize;
         let initial_idx_count = 1500usize;
 
@@ -706,10 +765,10 @@ float4 main(ps_in inp) : SV_Target0 {
         for batch in &self.batches {
             // Select pipeline based on whether we're using textures
             let uses_texture = batch.texture.id != self.texture_manager.get_white_texture().id;
-            let pipeline = if uses_texture {
-                self.textured_pipeline
-            } else {
-                self.colored_pipeline
+            let pipeline = match (batch.primitive_type, uses_texture) {
+                (PrimitiveType::Lines, _) => self.line_pipeline,
+                (PrimitiveType::Triangles, true) => self.textured_pipeline,
+                (PrimitiveType::Triangles, false) => self.colored_pipeline,
             };
 
             // Bind texture and sampler
@@ -745,19 +804,27 @@ float4 main(ps_in inp) : SV_Target0 {
     }
 
     fn add_batch(&mut self, texture: sg::Image, start_index: usize, index_count: usize) {
-        // Check if we can merge with the last batch
+        self.add_batch_with_type(texture, start_index, index_count, PrimitiveType::Triangles);
+    }
+    
+    fn add_batch_with_type(&mut self, texture: sg::Image, start_index: usize, index_count: usize, primitive_type: PrimitiveType) {
+        // Check if we can merge with the last batch (same texture AND same primitive type)
         if let Some(last_batch) = self.batches.last_mut() {
-            if last_batch.texture.id == texture.id {
+            // Only merge if EVERYTHING matches: texture, primitive type, AND indices are contiguous
+            if last_batch.texture.id == texture.id && 
+               last_batch.primitive_type as u8 == primitive_type as u8 &&  // Exact match
+               last_batch.start_index + last_batch.index_count == start_index {
                 last_batch.index_count += index_count;
                 return;
             }
         }
-
-        // Create new batch
+    
+        // Create new batch - no merging possible
         self.batches.push(DrawBatch {
             texture,
             start_index,
             index_count,
+            primitive_type,
         });
     }
 }
@@ -767,68 +834,106 @@ impl Renderer {
     pub fn draw_quad(&mut self, quad: &Quad) {
         let start_vertex = self.vertices.len() as u16;
         let start_index = self.indices.len();
-
-        // Create 4 vertices for the quad
+    
         let x1 = quad.position.x;
         let y1 = quad.position.y;
         let x2 = quad.position.x + quad.size.x;
         let y2 = quad.position.y + quad.size.y;
         
         let color = [quad.color.x, quad.color.y, quad.color.z, quad.color.w];
-
-        // Add vertices (clockwise)
+    
+        // Add vertices (same for both filled and outline)
         self.vertices.push(Vertex { pos: [x1, y1], texcoord: [0.0, 0.0], color });
         self.vertices.push(Vertex { pos: [x2, y1], texcoord: [1.0, 0.0], color });
         self.vertices.push(Vertex { pos: [x2, y2], texcoord: [1.0, 1.0], color });
         self.vertices.push(Vertex { pos: [x1, y2], texcoord: [0.0, 1.0], color });
-                
-        // Add indices for two triangles
-        let indices = [
-            start_vertex, start_vertex + 1, start_vertex + 2,
-            start_vertex, start_vertex + 2, start_vertex + 3,
-        ];
-        
-        self.indices.extend_from_slice(&indices);
-
-        self.add_batch(self.texture_manager.get_white_texture(), start_index, 6);
+    
+        if quad.outline_only {
+            // Line indices: connect the 4 corners in a loop
+            let line_indices = [
+                start_vertex, start_vertex + 1,     // top edge
+                start_vertex + 1, start_vertex + 2, // right edge  
+                start_vertex + 2, start_vertex + 3, // bottom edge
+                start_vertex + 3, start_vertex,     // left edge
+            ];
+            self.indices.extend_from_slice(&line_indices);
+            self.add_batch_with_type(self.texture_manager.get_white_texture(), start_index, 8, PrimitiveType::Lines);
+        } else {
+            // Triangle indices
+            let triangle_indices = [
+                start_vertex, start_vertex + 1, start_vertex + 2,
+                start_vertex, start_vertex + 2, start_vertex + 3,
+            ];
+            self.indices.extend_from_slice(&triangle_indices);
+            self.add_batch_with_type(self.texture_manager.get_white_texture(), start_index, 6, PrimitiveType::Triangles);
+        }
     }
-
+    
     pub fn draw_circle(&mut self, circle: &Circle) {
-        let center_vertex = self.vertices.len() as u16;
-        let color = [circle.color.x, circle.color.y, circle.color.z, circle.color.w];
-        
-        // Add center vertex
-        self.vertices.push(Vertex { 
-            pos: [circle.center.x, circle.center.y], 
-            texcoord: [0.5, 0.5],
-            color 
-        });
-        
-        // Add vertices around the circumference
-        for i in 0..circle.segments {
-            let angle = (i as f32 / circle.segments as f32) * 2.0 * std::f32::consts::PI;
-            let x = circle.center.x + angle.cos() * circle.radius;
-            let y = circle.center.y + angle.sin() * circle.radius;
+        if circle.outline_only {
+            let start_vertex = self.vertices.len() as u16;
+            let start_index = self.indices.len();
+            let color = [circle.color.x, circle.color.y, circle.color.z, circle.color.w];
             
-            self.vertices.push( Vertex { 
-                pos: [x, y],
-                texcoord: [0.5, 0.5],
+            // Add vertices around circumference only (no center)
+            for i in 0..circle.segments {
+                let angle = (i as f32 / circle.segments as f32) * 2.0 * std::f32::consts::PI;
+                let x = circle.center.x + angle.cos() * circle.radius;
+                let y = circle.center.y + angle.sin() * circle.radius;
+                
+                self.vertices.push(Vertex { 
+                    pos: [x, y],
+                    texcoord: [0.5, 0.5],
                     color 
+                });
+            }
+            
+            // Connect consecutive vertices with lines
+            for i in 0..circle.segments {
+                let next = (i + 1) % circle.segments;
+                self.indices.extend_from_slice(&[
+                    start_vertex + i as u16,
+                    start_vertex + next as u16,
+                ]);
+            }
+    
+            let line_count = circle.segments * 2;
+            self.add_batch_with_type(self.texture_manager.get_white_texture(), start_index, line_count as usize, PrimitiveType::Lines);
+        } else {
+            // Your existing filled circle code
+            let center_vertex = self.vertices.len() as u16;
+            let start_index = self.indices.len();
+            let color = [circle.color.x, circle.color.y, circle.color.z, circle.color.w];
+            
+            self.vertices.push(Vertex { 
+                pos: [circle.center.x, circle.center.y], 
+                texcoord: [0.5, 0.5],
+                color 
             });
+            
+            for i in 0..circle.segments {
+                let angle = (i as f32 / circle.segments as f32) * 2.0 * std::f32::consts::PI;
+                let x = circle.center.x + angle.cos() * circle.radius;
+                let y = circle.center.y + angle.sin() * circle.radius;
+                
+                self.vertices.push( Vertex { 
+                    pos: [x, y],
+                    texcoord: [0.5, 0.5],
+                    color 
+                });
+            }
+            
+            let triangle_count = circle.segments * 3;
+            for i in 0..circle.segments {
+                let next = (i + 1) % circle.segments;
+                self.indices.extend_from_slice(&[
+                    center_vertex,                    
+                    center_vertex + 1 + i as u16,    
+                    center_vertex + 1 + next as u16, 
+                ]);
+            }
+            self.add_batch_with_type(self.texture_manager.get_white_texture(), start_index, triangle_count as usize, PrimitiveType::Triangles);
         }
-        
-        // Add triangles from center to each edge
-        let triangle_count = circle.segments * 3;
-        for i in 0..circle.segments {
-            let next = (i + 1) % circle.segments;
-            self.indices.extend_from_slice(&[
-                center_vertex,                    // center
-                center_vertex + 1 + i as u16,    // current point on circumference
-                center_vertex + 1 + next as u16, // next point on circumference
-            ]);
-        }
-
-        self.add_batch(self.texture_manager.get_white_texture(), center_vertex as usize, triangle_count as usize);
     }
 
     pub fn draw_sprite(&mut self, sprite: &Sprite) {

@@ -37,9 +37,9 @@ The test game will start running.
 ### Texture/Sprite
 - [x] Load and render sprite
 - [x] Change sprite during 
+- [x] Sprite flipping (horizontal/vertical)
 - [ ] Sprite batching/instancing
 - [ ] Sprite tinting/color modulation
-- [ ] Sprite flipping (horizontal/vertical)
 - [ ] Sprite scaling
 - [ ] Texture atlas management
 
