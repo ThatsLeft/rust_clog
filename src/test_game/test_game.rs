@@ -2,7 +2,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use glam::{Vec2, Vec4};
 use sokol::{app as sapp, gfx as sg};
-use crate::engine::{check_collision, check_collision_with_point, AnimationManager, Camera2D, Circle, Collider, Game, GameConfig, InputManager, ParticleSystem, Quad, Renderer, Sprite, SpriteAnimations};
+use crate::engine::{check_collision, check_collision_with_point, AnimationManager, Camera2D, Circle, Collider, Game, GameConfig, InputManager, LoopType::Loop, ParticleSystem, Quad, Renderer, Sprite, SpriteAnimations};
 
 pub struct TestGame {
     frame_count: u64,
@@ -154,15 +154,25 @@ impl Game for TestGame {
             }
         }
 
-        animation_manager.register_animation(SpriteAnimations {
-            name: "player_thruster".to_string(),
-            texture_name: "ship_thruster_spritesheet".to_string(),
-            frame_size: Vec2::new(32.0, 32.0),  // Assuming 32x32 frames
-            frame_count: 4,
-            frames_per_row: 4,
-            duration: 1.0,  // 1 second for full animation
-            looping: true,
-        });
+        animation_manager.register_animation(SpriteAnimations::new(
+            "player_thruster".to_string(), 
+            "ship_thruster_spritesheet".to_string(), 
+            Vec2::new(32.0, 32.0), 
+            4, 
+            4, 
+            1.0, 
+            Loop,
+        )
+            // {
+            // name: "player_thruster".to_string(),
+            // texture_name: "ship_thruster_spritesheet".to_string(),
+            // frame_size: Vec2::new(32.0, 32.0),  // Assuming 32x32 frames
+            // frame_count: 4,
+            // frames_per_row: 4,
+            // duration: 1.0,  // 1 second for full animation
+            // looping: true,
+            // }
+        );
 
         println!("Game initialized!");
         println!("Window size: {}x{}", sapp::width(), sapp::height());

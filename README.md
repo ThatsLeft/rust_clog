@@ -45,10 +45,10 @@ The test game will start running.
 
 ### Animation
 - [x] Load sprite sheet with animations
+- [x] Animation looping modes (once, loop, ping-pong)
 - [ ] Animation state machine
 - [ ] Animation blending/transitions
 - [ ] Animation events/callbacks
-- [ ] Animation looping modes (once, loop, ping-pong)
 
 ### Particle system
 - [x] Particle struct
