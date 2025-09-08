@@ -1,6 +1,6 @@
 use sokol::{app as sapp, gfx as sg, glue as sglue};
 use std::ffi::{self, CString};
-use crate::engine::{AnimationManager, Camera2D, Game, GameConfig, InputManager, ParticleSystem, Renderer};
+use crate::engine::{AnimationManager, Camera2D, Game, GameConfig, SystemState, InputManager, ParticleSystem, Renderer};
 
 pub struct App<T: Game> {
     game: T,
@@ -15,18 +15,24 @@ struct AppState<T: Game> {
     input: InputManager,
     camera: Camera2D,
     animation_manager: AnimationManager,
-    particle_systems: Vec<ParticleSystem>
+    particle_systems: Vec<ParticleSystem>,
+
+
+    // Engine manages system state
+    system_state: SystemState,
+    previous_system_state: SystemState,
+    system_state_time: f32,
+    loading_progress: f32,
+    
+    // Track background state behavior
+    background_frame_throttle: u32,
+    background_frame_counter: u32,
 }
 
 impl<T: Game> App<T> {
     // default config
     pub fn new(game: T) -> Self {
         let config = T::config();
-        Self { game, config }
-    }
-
-    // custom config
-    pub fn new_with_config(game: T, config: GameConfig) -> Self {
         Self { game, config }
     }
 
@@ -48,6 +54,12 @@ impl<T: Game> App<T> {
             camera: Camera2D::new(),
             animation_manager: AnimationManager::new(),
             particle_systems: Vec::new(),
+            system_state: SystemState::Starting,
+            previous_system_state: SystemState::Starting,
+            system_state_time: 0.0,
+            loading_progress: 0.0,
+            background_frame_throttle: 4,
+            background_frame_counter: 0,
         });
 
         let user_data = Box::into_raw(state) as *mut ffi::c_void;
@@ -79,7 +91,6 @@ impl<T: Game> App<T> {
     }
 }
 
-// Sokol callback functions - now properly typed and following the examples
 extern "C" fn init<T: Game>(user_data: *mut ffi::c_void) {
     let state = unsafe { &mut *(user_data as *mut AppState<T>) };
     
@@ -135,43 +146,59 @@ extern "C" fn init<T: Game>(user_data: *mut ffi::c_void) {
 
 extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
     let state = unsafe { &mut *(user_data as *mut AppState<T>) };
-
     let dt = sapp::frame_duration() as f32;
-    
-    for system in &mut state.particle_systems {
-        system.update(dt);
+
+    if state.system_state != SystemState::Starting {
+        if let Some(requested_state) = state.game.request_system_state() {
+            // Validate the transition
+            if is_valid_transition(state.system_state, requested_state) {
+                change_system_state(state, requested_state);
+                return;
+            } else {
+                println!("Invalid state transition: {:?} -> {:?}", state.system_state, requested_state);
+            }
+        }
     }
-
-    // Update game logic
-    state.game.update(dt, &state.input, &mut state.camera, &mut state.animation_manager, &mut state.particle_systems);
-
-    // UPDATE: Add camera shake update
-    state.camera.update_shake(dt);
     
-    // Clear just pressed
+    // Handle state-specific updates
+    match state.system_state {
+        SystemState::Starting => {
+            state.system_state_time += dt;
+            state.loading_progress = (state.system_state_time / 2.0).min(1.0);
+            
+            if state.loading_progress >= 1.0 {
+                change_system_state(state, SystemState::GameActive);
+            }
+            
+            render_loading_screen(state);
+        }
+        
+        SystemState::GameActive => {
+            // Full game update and render
+            update_and_render_game(state, dt);
+        }
+        
+        SystemState::Background => {
+            state.background_frame_counter += 1;
+            
+            // Throttled updates - only every 4th frame
+            if state.background_frame_counter % state.background_frame_throttle == 0 {
+                // Reduced game update
+                state.game.update(dt * state.background_frame_throttle as f32, &state.input, 
+                                &mut state.camera, &mut state.animation_manager, &mut state.particle_systems);
+                
+                // Optional minimal rendering (or skip entirely)
+                render_background_state(state);
+            }
+            // Note: Game can still request state changes via request_system_state()
+        }
+        
+        SystemState::Shutdown => {
+            sapp::request_quit();
+        }
+    }
+        
     state.input.new_frame();
-    
-    // Set background color
-    if let Some(new_color) = state.game.get_background_color() {
-        state.pass_action.colors[0].clear_value = new_color;
-    }
-
-    // Begin render pass
-    sg::begin_pass(&sg::Pass {
-        action: state.pass_action,
-        swapchain: sglue::swapchain(),
-        ..Default::default()
-    });
-
-    // Let the game render
-    state.game.render(&mut state.renderer, &mut state.camera, &mut state.particle_systems);  // CHANGED
-    
-    // Flush renderer
-    state.renderer.flush(&mut state.camera);
-
-    // End pass and commit
-    sg::end_pass();
-    sg::commit();
 }
 
 extern "C" fn cleanup<T: Game>(user_data: *mut ffi::c_void) {
@@ -184,36 +211,213 @@ extern "C" fn event<T: Game>(event: *const sapp::Event, user_data: *mut ffi::c_v
     let state = unsafe { &mut *(user_data as *mut AppState<T>) };
     let event = unsafe { &*event };
     
-    // Process input events
+    // Engine handles system events
     match event._type {
-        sapp::EventType::KeyDown => {
-            state.input.handle_key_down(event.key_code);
+        sapp::EventType::Suspended => {
+            println!("System suspended");
+            change_system_state(state, SystemState::Background);
+            return;
         }
-        sapp::EventType::KeyUp => {
-            state.input.handle_key_up(event.key_code);
-        }
-        sapp::EventType::MouseMove => {
-            state.input.handle_mouse_move(event.mouse_x, event.mouse_y);
-        }
-        sapp::EventType::MouseDown => {
-            state.input.handle_mouse_button_down(event.mouse_button);
-        }
-        sapp::EventType::MouseUp => {
-            state.input.handle_mouse_button_up(event.mouse_button);
-        }
-        sapp::EventType::MouseScroll => {
-            state.input.handle_mouse_wheel(event.scroll_y);
+        sapp::EventType::Resumed => {
+            println!("System resumed");
+            // Only resume if we were actually in background
+            if state.system_state == SystemState::Background {
+                change_system_state(state, SystemState::GameActive);
+            }
+            return;
         }
         _ => {}
     }
-
-    // Handle window resize for camera
-    if event._type == sapp::EventType::Resized {
-        state.camera.set_viewport_size(
-            event.window_width as f32, 
-            event.window_height as f32
-        );
+    
+    match state.system_state {
+        SystemState::GameActive => {
+            // Process input for InputManager
+            process_input_events(state, event);
+            
+            // Pass event to game
+            state.game.handle_event(event);
+        }
+        SystemState::Background => {
+            // Limited event processing in background
+            match event._type {
+                sapp::EventType::Resized => {
+                    state.camera.set_viewport_size(event.window_width as f32, event.window_height as f32);
+                }
+                _ => {
+                    // Still pass to game, but game should handle appropriately
+                    state.game.handle_event(event);
+                }
+            }
+        }
+        SystemState::Starting => {
+            // No game events during startup
+            match event._type {
+                sapp::EventType::Resized => {
+                    state.camera.set_viewport_size(event.window_width as f32, event.window_height as f32);
+                }
+                _ => {}
+            }
+        }
+        SystemState::Shutdown => {
+            // No event processing during shutdown
+        }
     }
+    
+    // Process other events based on current state
+    match state.system_state {
+        SystemState::GameActive => {
+            // Process input for InputManager
+            process_input_events(state, event);
+            
+            // Pass event to game
+            state.game.handle_event(event);
+        }
+        SystemState::Background => {
+            // Limited event processing in background
+            match event._type {
+                sapp::EventType::Resized => {
+                    state.camera.set_viewport_size(event.window_width as f32, event.window_height as f32);
+                }
+                _ => {
+                    // Still pass to game, but game should handle appropriately
+                    state.game.handle_event(event);
+                }
+            }
+        }
+        SystemState::Starting => {
+            // No game events during startup
+            match event._type {
+                sapp::EventType::Resized => {
+                    state.camera.set_viewport_size(event.window_width as f32, event.window_height as f32);
+                }
+                _ => {}
+            }
+        }
+        SystemState::Shutdown => {
+            // No event processing during shutdown
+        }
+    }
+}
 
-    state.game.handle_event(event);
+// -- system helpers --
+fn update_and_render_game<T: Game>(state: &mut AppState<T>, dt: f32) {
+    // Full game update
+    for system in &mut state.particle_systems {
+        system.update(dt);
+    }
+    
+    state.game.update(dt, &state.input, &mut state.camera, 
+                    &mut state.animation_manager, &mut state.particle_systems);
+    
+    // Update background color if needed
+    if let Some(new_color) = state.game.request_background_color_change() {
+        state.pass_action.colors[0].clear_value = new_color;
+    }
+    
+    // Full rendering
+    sg::begin_pass(&sg::Pass {
+        action: state.pass_action,
+        swapchain: sglue::swapchain(),
+        ..Default::default()
+    });
+    
+    state.game.render(&mut state.renderer, &mut state.camera, &mut state.particle_systems);
+    state.renderer.flush(&mut state.camera);
+    
+    sg::end_pass();
+    sg::commit();
+}
+
+fn render_background_state<T: Game>(state: &mut AppState<T>) {
+    // Minimal rendering or skip entirely for battery saving
+    sg::begin_pass(&sg::Pass {
+        action: state.pass_action,
+        swapchain: sglue::swapchain(),
+        ..Default::default()
+    });
+    
+    // Could render at reduced quality or just clear screen
+    state.game.render(&mut state.renderer, &mut state.camera, &mut state.particle_systems);
+    state.renderer.flush(&mut state.camera);
+    
+    sg::end_pass();
+    sg::commit();
+}
+
+fn render_loading_screen<T: Game>(state: &mut AppState<T>) {
+    sg::begin_pass(&sg::Pass {
+        action: state.pass_action,
+        swapchain: sglue::swapchain(),
+        ..Default::default()
+    });
+    
+    state.game.engine_render_loading(&mut state.renderer, state.loading_progress);
+    state.renderer.flush(&mut state.camera);
+    
+    sg::end_pass();
+    sg::commit();
+}
+
+fn is_valid_transition(from: SystemState, to: SystemState) -> bool {
+    use SystemState::*;
+    
+    match (from, to) {
+        (Starting, GameActive) => true,
+        (Starting, _) => false,
+        (GameActive, GameActive) => true,
+        (GameActive, Background) => true,
+        (GameActive, Shutdown) => true,
+        (GameActive, Starting) => false,
+        (Background, GameActive) => true,
+        (Background, Shutdown) => true,
+        (Background, _) => false,
+        (Shutdown, _) => false,
+        (a, b) if a == b => {
+            true
+        },
+    }
+}
+
+fn process_input_events<T: Game>(state: &mut AppState<T>, event: &sapp::Event) {
+    match event._type {
+        sapp::EventType::KeyDown => state.input.handle_key_down(event.key_code),
+        sapp::EventType::KeyUp => state.input.handle_key_up(event.key_code),
+        sapp::EventType::MouseMove => state.input.handle_mouse_move(event.mouse_x, event.mouse_y),
+        sapp::EventType::MouseDown => state.input.handle_mouse_button_down(event.mouse_button),
+        sapp::EventType::MouseUp => state.input.handle_mouse_button_up(event.mouse_button),
+        sapp::EventType::MouseScroll => state.input.handle_mouse_wheel(event.scroll_y),
+        sapp::EventType::Resized => {
+            state.camera.set_viewport_size(event.window_width as f32, event.window_height as f32);
+        }
+        _ => {}
+    }
+}
+
+fn change_system_state<T: Game>(state: &mut AppState<T>, new_state: SystemState) {
+    if state.system_state != new_state {
+        println!("System state: {:?} -> {:?}", state.system_state, new_state);
+        
+        // Store previous state
+        state.previous_system_state = state.system_state;
+        state.system_state = new_state;
+        state.system_state_time = 0.0;
+        
+        // State-specific initialization
+        match new_state {
+            SystemState::Background => {
+                state.background_frame_counter = 0;
+                println!("Entering background mode - throttling to every {} frames", 
+                        state.background_frame_throttle);
+            }
+            SystemState::GameActive => {
+                if state.previous_system_state == SystemState::Background {
+                    println!("Resuming from background mode");
+                }
+            }
+            SystemState::Shutdown => {
+                println!("Initiating shutdown sequence");
+            }
+            _ => {}
+        }
+    }
 }

@@ -27,8 +27,7 @@ pub struct Quad {
     pub position: Vec2,
     pub size: Vec2,
     pub color: Vec4,
-    pub outline_only: bool,
-    pub outline_width: f32,
+    pub outline_only: bool
 }
 
 impl Quad {
@@ -37,14 +36,12 @@ impl Quad {
             position: Vec2::new(x, y),
             size: Vec2::new(width, height),
             color,
-            outline_only: false,
-            outline_width: 1.0,
+            outline_only: false
         }
     }
 
-    pub fn with_outline(mut self, outline_width: f32) -> Self {
+    pub fn with_outline(mut self) -> Self {
         self.outline_only = true;
-        self.outline_width = outline_width;
         self
     }
 }
@@ -56,7 +53,6 @@ pub struct Circle {
     pub color: Vec4,
     pub segments: u32, // Number of triangles to approximate the circle
     pub outline_only: bool,
-    pub outline_width: f32,
 }
 
 impl Circle {
@@ -66,14 +62,12 @@ impl Circle {
             radius,
             color,
             segments: 32, // Default to 32 segments for smooth appearance,
-            outline_only: false,
-            outline_width: 1.0,
+            outline_only: false
         }
     }
 
-    pub fn with_outline(mut self, outline_width: f32) -> Self {
+    pub fn with_outline(mut self) -> Self {
         self.outline_only = true;
-        self.outline_width = outline_width;
         self
     }
     

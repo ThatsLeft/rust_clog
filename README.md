@@ -23,6 +23,7 @@ The test game will start running.
 - [x] Window resize handling
 - [ ] Fullscreen toggle
 - [ ] VSync control
+- [ ] Custom app icon
 
 ### Camera
 - [x] Camera scene
@@ -103,7 +104,7 @@ The test game will start running.
 - [ ] Fixed timestep game loop
 - [ ] Delta time calculation
 - [ ] Frame rate limiting
-- [ ] Pause/resume functionality
+- [x] Pause/resume functionality
 
 ### UI System
 - [ ] Basic UI elements (text, buttons, panels)
