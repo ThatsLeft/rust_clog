@@ -8,6 +8,7 @@ pub mod texture;
 pub mod particle;
 
 use glam::Vec4;
+use std::collections::HashMap;
 use sokol::gfx as sg;
 pub use app::*;
 pub use input::*;
@@ -101,10 +102,10 @@ pub trait Game {
     fn engine_render_loading(&mut self, renderer: &mut Renderer, progress: f32);
     
 
-    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer, animation_manager: &mut AnimationManager);
-    fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D, animation_manager: &mut AnimationManager, particle_systems: &mut Vec<ParticleSystem>);
+    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>);
+    fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>);
     
-    fn render(&mut self, renderer: &mut Renderer, camera: &mut Camera2D, particle_systems: &mut Vec<ParticleSystem>);
+    fn render(&mut self, renderer: &mut Renderer, camera: &mut Camera2D, particle_systems: &mut HashMap<String, ParticleSystem>);
     
     fn handle_event(&mut self, event: &sokol::app::Event);
     

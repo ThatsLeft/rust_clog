@@ -1,5 +1,6 @@
 use sokol::{app as sapp, gfx as sg, glue as sglue};
 use std::ffi::{self, CString};
+use std::collections::HashMap;
 use crate::engine::{AnimationManager, Camera2D, Game, GameConfig, SystemState, InputManager, ParticleSystem, Renderer};
 
 pub struct App<T: Game> {
@@ -15,7 +16,7 @@ struct AppState<T: Game> {
     input: InputManager,
     camera: Camera2D,
     animation_manager: AnimationManager,
-    particle_systems: Vec<ParticleSystem>,
+    particle_systems: HashMap<String, ParticleSystem>,
 
 
     // Engine manages system state
@@ -53,7 +54,7 @@ impl<T: Game> App<T> {
             input: InputManager::new(),
             camera: Camera2D::new(),
             animation_manager: AnimationManager::new(),
-            particle_systems: Vec::new(),
+            particle_systems: HashMap::new(),
             system_state: SystemState::Starting,
             previous_system_state: SystemState::Starting,
             system_state_time: 0.0,
@@ -126,7 +127,7 @@ extern "C" fn init<T: Game>(user_data: *mut ffi::c_void) {
     // Set up default pass action for clearing screen
     state.pass_action.colors[0] = sg::ColorAttachmentAction {
         load_action: sg::LoadAction::Clear,
-        clear_value: sg::Color { r: 0.6, g: 0.6, b: 0.6, a: 1.0 },
+        clear_value: sg::Color { r: 8.0, g: 0.0, b: 0.0, a: 0.8 },
         ..Default::default()
     };
     
@@ -141,7 +142,7 @@ extern "C" fn init<T: Game>(user_data: *mut ffi::c_void) {
 
     // Let the game do its initialization
     let config = T::config();
-    state.game.init(&config, &mut state.renderer, &mut state.animation_manager);
+    state.game.init(&config, &mut state.renderer, &mut state.animation_manager, &mut state.particle_systems);
 }
 
 extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
@@ -164,7 +165,7 @@ extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
     match state.system_state {
         SystemState::Starting => {
             state.system_state_time += dt;
-            state.loading_progress = (state.system_state_time / 2.0).min(1.0);
+            state.loading_progress = (state.system_state_time / 1.0).min(1.0);
             
             if state.loading_progress >= 1.0 {
                 change_system_state(state, SystemState::GameActive);
@@ -302,13 +303,24 @@ extern "C" fn event<T: Game>(event: *const sapp::Event, user_data: *mut ffi::c_v
 // -- system helpers --
 fn update_and_render_game<T: Game>(state: &mut AppState<T>, dt: f32) {
     // Full game update
-    for system in &mut state.particle_systems {
+    for system in state.particle_systems.values_mut() {
         system.update(dt);
+    }
+
+    // Remove finished, duration-based systems
+    let finished_keys: Vec<String> = state.particle_systems
+        .iter()
+        .filter_map(|(k, s)| if s.is_finished() { Some(k.clone()) } else { None })
+        .collect();
+    for key in finished_keys {
+        state.particle_systems.remove(&key);
     }
     
     state.game.update(dt, &state.input, &mut state.camera, 
                     &mut state.animation_manager, &mut state.particle_systems);
     
+    state.camera.update_shake(dt);
+
     // Update background color if needed
     if let Some(new_color) = state.game.request_background_color_change() {
         state.pass_action.colors[0].clear_value = new_color;

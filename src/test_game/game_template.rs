@@ -1,7 +1,8 @@
 use glam::Vec4;
 use sokol::gfx as sg;
 
-use crate::engine::{Game, GameConfig, GameState, Quad, SystemState};
+use crate::engine::{Game, GameConfig, GameState, ParticleSystem, Quad, SystemState};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TemplateGameState {
@@ -55,7 +56,7 @@ impl Game for TemplateGame {
     
     /// Init your game.
     /// Load textures, and or other assets.
-    fn init(&mut self, config: &GameConfig, renderer: &mut crate::engine::Renderer, animation_manager: &mut crate::engine::AnimationManager) {
+    fn init(&mut self, config: &GameConfig, renderer: &mut crate::engine::Renderer, animation_manager: &mut crate::engine::AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>) {
         // ...
 
         self.game_state = TemplateGameState::MainMenu;
@@ -63,7 +64,7 @@ impl Game for TemplateGame {
     
     /// Update loop for the game.
     /// All game logic, physic and AI happens here.
-    fn update(&mut self, dt: f32, input: &crate::engine::InputManager, camera: &mut crate::engine::Camera2D, animation_manager: &mut crate::engine::AnimationManager, particle_systems: &mut Vec<crate::engine::ParticleSystem>) {
+    fn update(&mut self, dt: f32, input: &crate::engine::InputManager, camera: &mut crate::engine::Camera2D, animation_manager: &mut crate::engine::AnimationManager, particle_systems: &mut HashMap<String, crate::engine::ParticleSystem>) {
         match self.game_state {
             TemplateGameState::MainMenu => todo!(),
             TemplateGameState::Playing => todo!(),
@@ -73,7 +74,7 @@ impl Game for TemplateGame {
     }
     
     /// Render the window.
-    fn render(&mut self, renderer: &mut crate::engine::Renderer, camera: &mut crate::engine::Camera2D, particle_systems: &mut Vec<crate::engine::ParticleSystem>) {
+    fn render(&mut self, renderer: &mut crate::engine::Renderer, camera: &mut crate::engine::Camera2D, particle_systems: &mut HashMap<String, crate::engine::ParticleSystem>) {
         renderer.begin_frame();
 
         match self.game_state {

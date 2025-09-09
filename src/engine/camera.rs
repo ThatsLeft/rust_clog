@@ -1,7 +1,6 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use glam::{Vec2, Mat4};
-use sokol::app as sapp;
 
 pub struct Camera2D {
     pub position: Vec2,     // World position the camera is looking at
@@ -198,5 +197,21 @@ impl Camera2D {
 
     pub fn get_rotation(&self) -> f32 {
         self.rotation
+    }
+
+    pub fn view_half_extents(&self) -> Vec2 {
+        Vec2::new(self.viewport_width * 0.5 / self.zoom, self.viewport_height * 0.5 / self.zoom)
+    }
+
+    pub fn clamp_to_bounds(&mut self, min: Vec2, max: Vec2) {
+        let half = self.view_half_extents();
+        let clamped_x = self.position.x.clamp(min.x + half.x, max.x - half.x);
+        let clamped_y = self.position.y.clamp(min.y + half.y, max.y - half.y);
+        self.set_position(Vec2::new(clamped_x, clamped_y));
+    }
+
+    pub fn visible_aabb(&self) -> (Vec2, Vec2) {
+        let half = self.view_half_extents();
+        (self.position - half, self.position + half)
     }
 }
