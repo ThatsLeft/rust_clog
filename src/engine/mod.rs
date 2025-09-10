@@ -6,6 +6,7 @@ pub mod animation;
 pub mod collision;
 pub mod texture;
 pub mod particle;
+pub mod text;
 
 use glam::Vec4;
 use std::collections::HashMap;
@@ -18,6 +19,7 @@ pub use animation::*;
 pub use collision::*;
 pub use texture::*;
 pub use particle::*;
+pub use text::*;
 
 /// Game engine states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,13 +101,13 @@ pub trait Game {
     type State: GameState;
     fn config() -> GameConfig where Self: Sized;
     
-    fn engine_render_loading(&mut self, renderer: &mut Renderer, progress: f32);
+    fn engine_render_loading(&mut self, renderer: &mut Renderer, progress: f32, camera: &mut Camera2D);
     
 
     fn init(&mut self, config: &GameConfig, renderer: &mut Renderer, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>);
     fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>);
     
-    fn render(&mut self, renderer: &mut Renderer, camera: &mut Camera2D, particle_systems: &mut HashMap<String, ParticleSystem>);
+    fn render(&mut self, renderer: &mut Renderer, camera: &mut Camera2D);
     
     fn handle_event(&mut self, event: &sokol::app::Event);
     

@@ -9,3 +9,11 @@ glam = "0.30.5"
 sokol = { version="*", git="https://github.com/floooh/sokol-rust.git" }
 image = "0.24"
 rand = "0.9.2"
+
+[lib]
+name = "rusclog"
+path = "src/lib.rs"
+
+[[bin]]
+name = "test_game"
+path = "games/test_game/main.rs"

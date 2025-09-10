@@ -14,6 +14,9 @@ Clone the repository then start the app from root using cargo.
   
 The test game will start running.
 
+Particles are rendered and updated automatically just add and create particleSystems in game.
+
+
 ## Features
 ### Window
 - [x] Window open

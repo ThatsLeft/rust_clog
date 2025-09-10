@@ -25,14 +25,33 @@ impl ParticleColorSpec {
 }
 
 #[derive(Clone)]
+/// Specifies how a particle's initial velocity is generated when spawned.
+///
+/// Default is `Range { min: (-100, -100), max: (100, 100) }`, which picks
+/// each component uniformly in the given ranges. Use different variants to
+/// create streams, cones, or radial bursts.
 pub enum ParticleVelocitySpec {
+    /// Uses the same velocity vector for every spawned particle.
+    /// Useful for constant streams (e.g., wind or conveyor).
     Fixed(Vec2),
+    /// Samples x/y components independently and uniformly between `min` and `max`.
+    /// Produces a "random-in-a-box" scatter. If any min/max are swapped, they
+    /// are auto-corrected at spawn time.
     Range { min: Vec2, max: Vec2 },
+    /// Emits roughly along `dir` with a random speed in [`speed_min`, `speed_max`]
+    /// and a random angular deviation up to `spread_rad` (radians).
+    /// Great for cones/fans like thrusters or muzzle flashes. Zero `dir`
+    /// defaults to (1, 0). Speed bounds are auto-corrected and clamped ≥ 0.
     Direction { dir: Vec2, speed_min: f32, speed_max: f32, spread_rad: f32 },
+    /// Chooses a random angle in [0, 2π] and a random speed in
+    /// [`speed_min`, `speed_max`], emitting outward (360° burst).
+    /// Ideal for explosions or omnidirectional effects. Speeds clamped ≥ 0.
     Radial { speed_min: f32, speed_max: f32 },
 }
 
 impl ParticleVelocitySpec {
+    /// Returns the default velocity spec matching the engine's prior behavior:
+    /// a uniform component-wise range in a centered box.
     fn default() -> Self {
         // Matches your current behavior: random in a box
         Self::Range { min: Vec2::new(-100.0, -100.0), max: Vec2::new(100.0, 100.0) }
@@ -96,17 +115,26 @@ impl ParticleSystem {
     pub fn with_fixed_velocity(mut self, v: Vec2) -> Self {
         self.velocity_spec = ParticleVelocitySpec::Fixed(v); self
     }
+
     pub fn with_velocity_range(mut self, min: Vec2, max: Vec2) -> Self {
         self.velocity_spec = ParticleVelocitySpec::Range { min, max }; self
     }
+
     pub fn with_velocity_direction(mut self, dir: Vec2, speed_min: f32, speed_max: f32, spread_rad: f32) -> Self {
         self.velocity_spec = ParticleVelocitySpec::Direction { dir, speed_min, speed_max, spread_rad }; self
     }
+
     pub fn with_velocity_radial(mut self, speed_min: f32, speed_max: f32) -> Self {
         self.velocity_spec = ParticleVelocitySpec::Radial { speed_min, speed_max }; self
     }
-    pub fn with_acceleration(mut self, accel: Vec2) -> Self { self.global_accel = accel; self }
-    pub fn with_drag(mut self, drag: f32) -> Self { self.drag = drag.max(0.0); self }
+
+    pub fn with_acceleration(mut self, accel: Vec2) -> Self { 
+        self.global_accel = accel; self 
+    }
+
+    pub fn with_drag(mut self, drag: f32) -> Self { 
+        self.drag = drag.max(0.0); self 
+    }
     
     pub fn with_lifetime(mut self, lifetime: ParticleSystemLifetime) -> Self {
         self.lifetime = lifetime;

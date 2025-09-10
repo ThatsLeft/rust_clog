@@ -1,9 +1,9 @@
-mod engine;
-mod test_game;
-
 use engine::App;
+use rusclog::engine;
 
 use crate::test_game::TestGame;
+
+pub mod test_game;
 
 fn main() {
     let game = TestGame::new();

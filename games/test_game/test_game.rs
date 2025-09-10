@@ -37,6 +37,9 @@ pub struct TestGame {
     completed_fx_started: bool,
     completed_fx_timer: f32,
     completed_fx_next_burst: f32,
+    text: Option<crate::engine::TextRenderer>,
+    hud_msg: Option<String>,
+    hud_timer: f32,
 }
 
 // Functions and functionality for the test game
@@ -88,6 +91,9 @@ impl TestGame {
             completed_fx_started: false,
             completed_fx_timer: 0.0,
             completed_fx_next_burst: 0.0,
+            text: None,
+            hud_msg: None,
+            hud_timer: 0.0,
         }
     }
 
@@ -219,7 +225,7 @@ impl Game for TestGame {
 
         self.current_background = config.background_color;
         self.new_background = true;
-        
+
         // Load the texture once here.
         for texture_name in &self.texture_names {
             let path = format!("assets/{}.png", texture_name);
@@ -229,6 +235,13 @@ impl Game for TestGame {
                 eprintln!("Failed to load texture: {}", texture_name);
             }
         }
+
+        
+        // Load font texture once
+        let _ = renderer.load_texture("font", "assets/font.png");
+        // Create a text renderer: 16x16 atlas, 8x8 glyphs (adjust to your atlas)
+        self.text = Some(crate::engine::TextRenderer::new("font", 16.0, 16.0, 16, 6));
+        
 
         animation_manager.register_animation(SpriteAnimations::new(
             "player_thruster".to_string(), 
@@ -266,7 +279,14 @@ impl Game for TestGame {
     }
 
     fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>) {
-        // Handle game state transitions first
+        if self.hud_timer > 0.0 {
+            self.hud_timer -= dt;
+            if self.hud_timer <= 0.0 {
+                self.hud_msg = None;
+            }
+        }
+
+        // Handle game state transitions
         match self.game_state {
             TestGameState::MainMenu => {
                 if input.is_key_pressed(sapp::Keycode::Enter) {
@@ -278,9 +298,6 @@ impl Game for TestGame {
                 }
             }
             TestGameState::Playing => {
-
-                self.frame_count += 1;
-                let time: f32 = self.frame_count as f32 * dt;
         
                 if input.is_key_pressed(sapp::Keycode::P) {
                     self.game_state = TestGameState::Paused;
@@ -338,13 +355,14 @@ impl Game for TestGame {
                     if let Some((hit_box_index, collision_point)) = self.check_sprite_collisions() {
                         let color = self.asteroids[hit_box_index].color;
                         camera.add_shake(5.0, 0.2);
-                        let explosion_system = ParticleSystem::new(collision_point, 80.0, 0.2, 0.5).with_fixed_color(color);
+                        let explosion_system = ParticleSystem::new(collision_point, 50.0, 0.2, 1.5).with_fixed_color(color);
                         let key = format!("explosion_{}", rand::rng().random_range(0..1_000_000));
                         particle_systems.insert(key, explosion_system);
 
                         // Remove the hit box
                         self.asteroids.remove(hit_box_index);
-                        println!("Box collected! {} boxes remaining", self.asteroids.len());
+                        self.hud_msg = Some(format!("Box collected! {} boxes remaining", self.asteroids.len()));
+                        self.hud_timer = 1.5;
                     }
                 }
                 else {
@@ -463,17 +481,10 @@ impl Game for TestGame {
                 // Handle loading/transition logic
             }
         }
-        
-        if self.frame_count % 60 == 0 {
-            println!("FPS: {:.1} | Camera: pos({:.0}, {:.0}) zoom({:.2}) rot({:.2})", 
-                        1.0 / dt, 
-                        camera.get_position().x, camera.get_position().y,
-                        camera.get_zoom(), camera.get_rotation());
-        }
-        
+                
     }
 
-    fn render(&mut self, renderer: &mut Renderer, camera: &mut Camera2D, particle_systems: &mut HashMap<String, ParticleSystem>) {
+    fn render(&mut self, renderer: &mut Renderer, camera: &mut Camera2D) {
         renderer.begin_frame();
     
         match self.game_state {
@@ -487,6 +498,17 @@ impl Game for TestGame {
                 
                 let start_button = Quad::new(-100.0, 0.0, 200.0, 50.0, Vec4::new(0.0, 0.8, 0.0, 1.0));
                 renderer.draw_quad(&start_button);
+
+                if let Some(text) = &self.text {
+                    let mut t = text.clone();
+                    t.set_scale(3.0);
+                    t.set_color(Vec4::new(1.0, 1.0, 0.2, 1.0));
+                    // Test with simple characters first
+                    t.draw_text_world(renderer, glam::Vec2::new(-140.0, 120.0), "ABC");
+                    t.set_scale(2.0);
+                    t.set_color(Vec4::new(1.0, 1.0, 1.0, 1.0));
+                    t.draw_text_world(renderer, glam::Vec2::new(-90.0, 10.0), "123");
+                }
             }
             TestGameState::Playing => {
 
@@ -529,10 +551,13 @@ impl Game for TestGame {
                     Vec4::new(1.0, 0.0, 0.0, 1.0)).with_outline();
 
                 renderer.draw_quad(&player_collider_outline);
-                
-                for system in particle_systems.values_mut() {
-                    for particle in system.get_particles() {
-                        renderer.draw_particle(particle);
+
+                if let (Some(text), Some(msg)) = (&self.text, &self.hud_msg) {
+                    if self.hud_timer > 0.0 {
+                        let mut t = text.clone();
+                        t.set_scale(1.0);
+                        t.set_color(Vec4::new(1.0, 1.0, 1.0, 1.0));
+                        t.draw_top_right(renderer, camera, Vec2::new(20.0, 20.0), msg);
                     }
                 }
             }
@@ -542,13 +567,7 @@ impl Game for TestGame {
                     renderer.draw_circle(astroid);
                 }
                 renderer.draw_sprite(&self.player);
-                
-                for system in particle_systems.values_mut() {
-                    for particle in system.get_particles() {
-                        renderer.draw_particle(particle);
-                    }
-                }
-                
+                                
                 // Pause overlay
                 let pause_overlay = Quad::new(
                     camera.get_position().x - 400.0,
@@ -584,12 +603,6 @@ impl Game for TestGame {
                     Vec4::new(1.0, 1.0, 1.0, 1.0)
                 );
                 renderer.draw_quad(&completed_text);
-
-                for system in particle_systems.values_mut() {
-                    for particle in system.get_particles() {
-                        renderer.draw_particle(particle);
-                    }
-                }
             }
             _ => {
                 // Handle other states as needed
@@ -634,10 +647,18 @@ impl Game for TestGame {
         state
     }
     
-    fn engine_render_loading(&mut self, renderer: &mut Renderer, progress: f32) {
-        let loading_box = Quad::new(-200.0, -50.0, 400.0 * progress, 20.0, 
-                                  Vec4::new(0.0, 1.0, 0.0, 1.0));
+    fn engine_render_loading(&mut self, renderer: &mut Renderer, progress: f32, camera: &mut Camera2D) {
+        let loading_box = Quad::new(-200.0, -50.0, 400.0 * progress, 20.0, Vec4::new(0.0, 1.0, 0.0, 1.0));
         renderer.draw_quad(&loading_box);
+
+        if let Some(text) = &self.text {
+            let mut txt = text.clone();
+            txt.set_scale(1.0);
+            txt.set_color(Vec4::new(1.0, 1.0, 1.0, 1.0));
+            let pct = (progress * 100.0).round() as i32;
+            // world-space anchor near the left edge of the bar
+            txt.draw_text_world(renderer, glam::Vec2::new(-190.0, -45.0), &format!("Loading {}%", pct));
+        }
     }
     
 }

@@ -1,7 +1,7 @@
 use sokol::{app as sapp, gfx as sg, glue as sglue};
 use std::ffi::{self, CString};
 use std::collections::HashMap;
-use crate::engine::{AnimationManager, Camera2D, Game, GameConfig, SystemState, InputManager, ParticleSystem, Renderer};
+use crate::engine::{camera, AnimationManager, Camera2D, Game, GameConfig, InputManager, ParticleSystem, Renderer, SystemState};
 
 pub struct App<T: Game> {
     game: T,
@@ -165,7 +165,7 @@ extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
     match state.system_state {
         SystemState::Starting => {
             state.system_state_time += dt;
-            state.loading_progress = (state.system_state_time / 1.0).min(1.0);
+            state.loading_progress = (state.system_state_time / 5.0).min(1.0);
             
             if state.loading_progress >= 1.0 {
                 change_system_state(state, SystemState::GameActive);
@@ -333,9 +333,16 @@ fn update_and_render_game<T: Game>(state: &mut AppState<T>, dt: f32) {
         ..Default::default()
     });
     
-    state.game.render(&mut state.renderer, &mut state.camera, &mut state.particle_systems);
+    state.game.render(&mut state.renderer, &mut state.camera);
+
+    for system in state.particle_systems.values_mut() {
+        for particle in system.get_particles() {
+            state.renderer.draw_particle(particle);
+        }
+    }
+
     state.renderer.flush(&mut state.camera);
-    
+
     sg::end_pass();
     sg::commit();
 }
@@ -349,7 +356,7 @@ fn render_background_state<T: Game>(state: &mut AppState<T>) {
     });
     
     // Could render at reduced quality or just clear screen
-    state.game.render(&mut state.renderer, &mut state.camera, &mut state.particle_systems);
+    state.game.render(&mut state.renderer, &mut state.camera);
     state.renderer.flush(&mut state.camera);
     
     sg::end_pass();
@@ -363,7 +370,7 @@ fn render_loading_screen<T: Game>(state: &mut AppState<T>) {
         ..Default::default()
     });
     
-    state.game.engine_render_loading(&mut state.renderer, state.loading_progress);
+    state.game.engine_render_loading(&mut state.renderer, state.loading_progress, &mut state.camera);
     state.renderer.flush(&mut state.camera);
     
     sg::end_pass();

@@ -49,7 +49,7 @@ impl Game for TemplateGame {
     }
 
     /// The inital loading screen for when the game starts.
-    fn engine_render_loading(&mut self, renderer: &mut crate::engine::Renderer, progress: f32) {
+    fn engine_render_loading(&mut self, renderer: &mut crate::engine::Renderer, progress: f32, camera: &mut crate::engine::Camera2D) {
         let loading_box = Quad::new(-200.0, -50.0, 400.0 * progress, 20.0, Vec4::new(0.0, 1.0, 0.0, 1.0));
         renderer.draw_quad(&loading_box);
     }
@@ -74,7 +74,7 @@ impl Game for TemplateGame {
     }
     
     /// Render the window.
-    fn render(&mut self, renderer: &mut crate::engine::Renderer, camera: &mut crate::engine::Camera2D, particle_systems: &mut HashMap<String, crate::engine::ParticleSystem>) {
+    fn render(&mut self, renderer: &mut crate::engine::Renderer, camera: &mut crate::engine::Camera2D) {
         renderer.begin_frame();
 
         match self.game_state {
