@@ -1,8 +1,9 @@
-use glam::{Vec2, Vec3, Vec4};
+use glam::{Vec2, Vec4};
 use rand::Rng;
+use rusclog::engine::{gravity::{GravityFalloff, GravityField}, physics_world::PhysicsWorld, rigid_body::{BodyId, RigidBody}};
 use sokol::{app::{self as sapp}, gfx as sg};
-use crate::engine::{check_collision, check_collision_with_point, AnimationManager, Camera2D, Circle, Collider, CollisionShape, Game, GameConfig, InputManager, LoopType::{self}, ParticleSystem, Quad, Renderer, Sprite, SpriteAnimations, SystemState};
-use std::{collections::HashMap, string};
+use crate::engine::{check_collision_with_point, AnimationManager, Camera2D, Circle, Collider, CollisionShape, Game, GameConfig, InputManager, LoopType::{self}, ParticleSystem, Quad, Renderer, Sprite, SpriteAnimations, SystemState};
+use std::collections::HashMap;
 
 /// The current games statemachine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,10 +26,11 @@ pub struct TestGame {
     frame_count: u64,
     current_background: sg::Color,
     new_background: bool,
-    asteroids: Vec<Circle>,
+    asteroids: HashMap<BodyId, Circle>,
     player: Sprite,
     player_animation: bool,
     player_thruster_idx: Option<String>,
+    player_body_id: Option<BodyId>,
     texture_names: Vec<String>,
     game_state: TestGameState,
     requested_system_state: Option<SystemState>,
@@ -45,26 +47,8 @@ pub struct TestGame {
 // Functions and functionality for the test game
 impl TestGame {
     pub fn new() -> Self {
-        let mut asteroids = Vec::new();
-        let mut rng = rand::rng();
-
-        for i in 0..20 {
-            let x = rng.random_range(-1000.0..=1000.0);
-            let y = rng.random_range(-750.0..=750.0);
-            
-            let color = match i % 4 {
-                0 => Vec4::new(1.0, 0.5, 0.0, 1.0), // Orange
-                1 => Vec4::new(0.5, 0.0, 1.0, 1.0), // Purple  
-                2 => Vec4::new(0.0, 1.0, 1.0, 1.0), // Cyan
-                _ => Vec4::new(1.0, 1.0, 0.0, 1.0), // Yellow
-            };
-
-            let radius = rng.random_range(5.0..=75.0);
-            let segments = rng.random_range(5.0..=32.0) as u32;
-            
-            asteroids.push(Circle::new(x, y, radius, color).with_segments(segments));
-        }
-
+        let mut asteroids = HashMap::new();
+        
         Self {
             frame_count: 0,
             current_background: sg::Color { r: 0.0, g: 0.4, b: 0.7, a: 1.0 },
@@ -77,6 +61,7 @@ impl TestGame {
                 .with_texture_name("ship".to_string()),
             player_animation: false,
             player_thruster_idx: None,
+            player_body_id: None,
             texture_names: vec![
                 "ship".to_string(),
                 "bullet".to_string(), 
@@ -102,51 +87,20 @@ impl TestGame {
         self.new_background = true;
     }
 
-    fn check_sprite_collisions(&self) -> Option<(usize, Vec2)> {
-        let player_collider = self.get_player_collider();
-
-        // Check collision with all world boxes
-        for (index, box_collider) in self.get_astroid_colliders().iter().enumerate() {
-            let result = check_collision_with_point(&player_collider, box_collider);
-            if result.collided {
-                return Some((index, result.contact_point));
-            }
-        }
-        
-        None
-    }
-
-    fn get_player_collider(&self) -> Collider {
-        // Sprite position is already in world coordinates
-        Collider::new_rect(
-            self.player.position.x - self.player.size.x / 4.0,
-            self.player.position.y - self.player.size.y / 4.0,
-            self.player.size.x/2.0,
-            self.player.size.y/2.0 
-        )
-    }
-    
-    fn get_astroid_colliders(&self) -> Vec<Collider> {
-        self.asteroids.iter().map(|quad| {
-            Collider::new_circle(
-                quad.center.x,
-                quad.center.y, 
-                quad.radius,
-            )
-        }).collect()
-    }
-
-    fn reset_game(&mut self, camera: &mut Camera2D) {
+    fn reset_game(&mut self, camera: &mut Camera2D, physics_world: &mut PhysicsWorld) {
         // Reset game to initial state
         self.frame_count = 0;
         self.current_background = sg::Color { r: 0.0, g: 0.4, b: 0.7, a: 1.0 };
         self.player.position = Vec2::new(-10.0, -100.0);
         self.game_state = TestGameState::Playing;
         
-        // Regenerate world boxes
-        let mut rng = rand::rng();
+        // Clear existing asteroids from both visual and physics
         self.asteroids.clear();
+        // Note: You'll also need to clear physics bodies, but you'd need a method like:
+        // physics_world.clear_all_bodies_except(self.player_body_id);
         
+        // Regenerate asteroids
+        let mut rng = rand::rng();
         for i in 0..20 {
             let x = rng.random_range(-1000.0..=1000.0);
             let y = rng.random_range(-750.0..=750.0);
@@ -159,10 +113,21 @@ impl TestGame {
             };
             
             let radius = rng.random_range(5.0..=75.0);
-            let segments = rng.random_range(5.0..=32.0) as u32; 
-            self.asteroids.push(Circle::new(x, y, radius, color).with_segments(segments));
+            let segments = rng.random_range(5.0..=32.0) as u32;
+            
+            let circle = Circle::new(x, y, radius, color).with_segments(segments);
+            let collider = Collider::new_circle(x, y, radius);
+            let mut body = RigidBody::new_static(BodyId(i as u32), Vec2::new(x, y), collider);
+            
+            if i == 0 {
+                let gravity_field = GravityField::new(200.0, 300.0, GravityFalloff::Custom(0.001));
+                body.set_gravity_field(Some(gravity_field));
+            }
+            
+            let body_id = physics_world.add_body(body);
+            self.asteroids.insert(body_id, circle);
         }
-
+    
         let target_camera_pos = self.player.position + Vec2::new(50.0, 25.0);
         camera.set_position(target_camera_pos);
     }
@@ -221,10 +186,11 @@ impl Game for TestGame {
             .with_high_dpi(false)
     }
     
-    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>) {
+    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>, physics_world: &mut PhysicsWorld) {
 
         self.current_background = config.background_color;
         self.new_background = true;
+        physics_world.set_substeps(4);
 
         // Load the texture once here.
         for texture_name in &self.texture_names {
@@ -235,14 +201,12 @@ impl Game for TestGame {
                 eprintln!("Failed to load texture: {}", texture_name);
             }
         }
-
         
         // Load font texture once
         let _ = renderer.load_texture("font", "assets/font.png");
         // Create a text renderer: 16x16 atlas, 8x8 glyphs (adjust to your atlas)
         self.text = Some(crate::engine::TextRenderer::new("font", 16.0, 16.0, 16, 6));
         
-
         animation_manager.register_animation(SpriteAnimations::new(
             "player_thruster".to_string(), 
             "ship_thruster_spritesheet".to_string(), 
@@ -272,13 +236,52 @@ impl Game for TestGame {
         // store None for now; direct key access is preferable
         self.player_thruster_idx = Some("player_thruster".to_string());
 
+        
+        self.asteroids.clear(); // Clear any existing
+        for i in 0..20 {
+            let mut rng = rand::rng();
+            let x = rng.random_range(-1000.0..=1000.0);
+            let y = rng.random_range(-750.0..=750.0);
+            
+            let color = match i % 4 {
+                0 => Vec4::new(1.0, 0.5, 0.0, 1.0),
+                1 => Vec4::new(0.5, 0.0, 1.0, 1.0), 
+                2 => Vec4::new(0.0, 1.0, 1.0, 1.0),
+                _ => Vec4::new(1.0, 1.0, 0.0, 1.0),
+            };
+
+            let radius = rng.random_range(5.0..=75.0);
+            let segments = rng.random_range(5.0..=32.0) as u32;
+            
+            let circle = Circle::new(x, y, radius, color).with_segments(segments);
+            let collider = Collider::new_circle(x, y, radius);
+            let mut body = RigidBody::new_static(BodyId(i as u32), Vec2::new(x, y), collider);
+            
+            if i == 0 {
+                let gravity_field = GravityField::new(200.0, 300.0, GravityFalloff::Custom(0.001));
+                body.set_gravity_field(Some(gravity_field));
+            }
+            
+            let body_id = physics_world.add_body(body);
+            self.asteroids.insert(body_id, circle);
+        }
+        
+        // Create a dynamic body for the player
+        let radius = (self.player.size.x.min(self.player.size.y)) * 0.15;
+        let player_collider = Collider::new_circle(self.player.position.x, self.player.position.y, radius);
+        let player_body = RigidBody::new_dynamic(BodyId(999), self.player.position, player_collider, 1.0)
+            .with_restitution(0.05)
+            .with_friction(0.2)
+            .with_drag(0.6);
+        self.player_body_id = Some(physics_world.add_body(player_body));
+
         println!("Game initialized!");
         println!("Window size: {}x{}", sapp::width(), sapp::height());
         self.game_state = TestGameState::MainMenu;
 
     }
 
-    fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>) {
+    fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>, physics_world: &mut PhysicsWorld) {
         if self.hud_timer > 0.0 {
             self.hud_timer -= dt;
             if self.hud_timer <= 0.0 {
@@ -301,88 +304,122 @@ impl Game for TestGame {
         
                 if input.is_key_pressed(sapp::Keycode::P) {
                     self.game_state = TestGameState::Paused;
+                    self.requested_system_state = Some(SystemState::GamePaused);
                 }
                 if input.is_key_pressed(sapp::Keycode::M) {
                     self.game_state = TestGameState::MainMenu;
                 }
                 // Continue with existing game logic below
 
-                let mut player_movement = Vec2::ZERO;
+                let mut thrust_force = Vec2::ZERO;
+                const THRUST_STRENGTH: f32 = 500.0; // Adjust this value to control acceleration
+
                 if input.is_key_down(sapp::Keycode::W) {
-                    player_movement.y += 1.0;
+                    thrust_force.y += THRUST_STRENGTH;
                 }
                 if input.is_key_down(sapp::Keycode::S) {
-                    player_movement.y -= 1.0;
+                    thrust_force.y -= THRUST_STRENGTH;
                 }
                 if input.is_key_down(sapp::Keycode::A) {
-                    player_movement.x -= 1.0;
+                    thrust_force.x -= THRUST_STRENGTH;
                 }
                 if input.is_key_down(sapp::Keycode::D) {
-                    player_movement.x += 1.0;
+                    thrust_force.x += THRUST_STRENGTH;
+                }
+                
+                if let Some(body_id) = self.player_body_id {
+                    if let Some(body) = physics_world.get_body_mut(body_id) {
+                        if thrust_force.length() > 0.0 {
+                            // Apply thrust force
+                            body.apply_force(thrust_force);
+                            
+                            // Handle animation
+                            if !self.player_animation {
+                                self.player.change_texture("ship_thruster_spritesheet".to_string());
+                                animation_manager.play_animation(&mut self.player, "player_thruster");
+                                self.player_animation = true;
+                            }
+                            
+                            // Calculate rotation based on thrust direction
+                            self.player.rotation = thrust_force.y.atan2(thrust_force.x) - std::f32::consts::PI / 2.0;
+                
+                            // Update thruster particles
+                            if let Some(key) = &self.player_thruster_idx {
+                                if let Some(sys) = particle_systems.get_mut(key) {
+                                    let backward = thrust_force.normalize();
+                                    let offset = Vec2::new(-backward.x, -backward.y) * (self.player.size.y * 0.4);
+                                    sys.set_spawn_position(body.position + offset);
+                                    sys.set_velocity_direction(Vec2::new(-backward.x, -backward.y), 40.0, 90.0, 0.5);
+                                    sys.set_emission_rate(120.0);
+                                }
+                            }
+                        } else {
+                            // No thrust - turn off animation and thruster
+                            self.player.change_texture("ship".to_string());
+                            self.player.size = Vec2::new(32.0, 32.0);
+                            self.player.uv = Vec4::new(0.0, 0.0, 1.0, 1.0);
+                            self.player_animation = false;
+                            animation_manager.stop_animation(&mut self.player);
+                
+                            if let Some(key) = &self.player_thruster_idx {
+                                if let Some(sys) = particle_systems.get_mut(key) {
+                                    sys.set_emission_rate(0.0);
+                                }
+                            }
+                        }
+                        
+                        // Sync sprite position with physics body
+                        self.player.position = body.position;
+                        
+                        // Keep player within world bounds by clamping physics body position
+                        let half = self.player.size * 0.5;
+                        let clamped_pos = Vec2::new(
+                            body.position.x.clamp(self.world_min.x + half.x, self.world_max.x - half.x),
+                            body.position.y.clamp(self.world_min.y + half.y, self.world_max.y - half.y)
+                        );
+                        
+                        if clamped_pos != body.position {
+                            body.set_position(clamped_pos);
+                            self.player.position = clamped_pos;
+                        }
+                    }
+                }
+                
+                // Collect collision information first
+                let mut player_collisions = Vec::new();
+                for event in physics_world.get_collision_events() {
+                    if let Some(player_body_id) = self.player_body_id {
+                        if event.body1_id == player_body_id {
+                            player_collisions.push((event.body2_id, event.contact_point));
+                        } else if event.body2_id == player_body_id {
+                            player_collisions.push((event.body1_id, event.contact_point));
+                        }
+                    }
                 }
 
-                if player_movement.length() > 0.0 {
-                    if !self.player_animation {
-                        self.player.change_texture("ship_thruster_spritesheet".to_string());
-                        animation_manager.play_animation(&mut self.player, "player_thruster");
-                        self.player_animation = true;
-                    } 
-                    let movement = player_movement.normalize() * 200.0 * dt;
-                    // let old_position = self.test_sprite.position;
-                    self.player.position += movement;
-                    let half = self.player.size * 0.5;
-                    self.player.position.x = self.player.position.x.clamp(self.world_min.x + half.x, self.world_max.x - half.x);
-                    self.player.position.y = self.player.position.y.clamp(self.world_min.y + half.y, self.world_max.y - half.y);
-                
-                    // Calculate rotation
-                    self.player.rotation = player_movement.y.atan2(player_movement.x) - std::f32::consts::PI / 2.0;
-
-                    // Update thruster system to follow and emit opposite to movement
-                    if let Some(key) = &self.player_thruster_idx {
-                        if let Some(sys) = particle_systems.get_mut(key) {
-                            // Position thruster slightly behind ship
-                            let backward = player_movement.normalize();
-                            let offset = Vec2::new(-backward.x, -backward.y) * (self.player.size.y * 0.4);
-                            sys.set_spawn_position(self.player.position + offset);
-                            // Emit opposite of movement
-                            sys.set_velocity_direction(Vec2::new(-backward.x, -backward.y), 40.0, 90.0, 0.5);
-                            // Make sure thruster is on while moving
-                            sys.set_emission_rate(120.0);
-                        }
+                // Now process collisions without holding any borrows
+                for (other_id, contact_point) in player_collisions {
+                    // Mark asteroid for deletion
+                    if let Some(hit_body) = physics_world.get_body_mut(other_id) {
+                        hit_body.mark_for_deletion();
                     }
                     
-                    // Check for collisions
-                    if let Some((hit_box_index, collision_point)) = self.check_sprite_collisions() {
-                        let color = self.asteroids[hit_box_index].color;
+                    // Remove visual asteroid and create explosion
+                    if let Some(circle) = self.asteroids.remove(&other_id) {
+                        let color = circle.color;
                         camera.add_shake(5.0, 0.2);
-                        let explosion_system = ParticleSystem::new(collision_point, 50.0, 0.2, 1.5).with_fixed_color(color);
+                        let explosion_system = ParticleSystem::new(contact_point, 50.0, 0.2, 1.5)
+                            .with_fixed_color(color);
                         let key = format!("explosion_{}", rand::rng().random_range(0..1_000_000));
                         particle_systems.insert(key, explosion_system);
-
-                        // Remove the hit box
-                        self.asteroids.remove(hit_box_index);
-                        self.hud_msg = Some(format!("Box collected! {} boxes remaining", self.asteroids.len()));
-                        self.hud_timer = 1.5;
                     }
+                    
+                    self.hud_msg = Some(format!("Asteroid hit! {} asteroids remaining", self.asteroids.len()));
+                    self.hud_timer = 1.5;
                 }
-                else {
-                    self.player.change_texture("ship".to_string());
-                    self.player.size = Vec2::new(32.0, 32.0);
-                    self.player.uv = Vec4::new(0.0, 0.0, 1.0, 1.0); 
-                    self.player_animation = false;
-                    animation_manager.stop_animation(&mut self.player);
 
-                    // Idle: keep thruster system but stop emission
-                    if let Some(key) = &self.player_thruster_idx {
-                        if let Some(sys) = particle_systems.get_mut(key) {
-                            sys.set_emission_rate(0.0);
-                            sys.set_spawn_position(self.player.position);
-                        }
-                    }
-
-                }
-                
                 animation_manager.update_sprite_animation(&mut self.player, dt);
+                let _removed_bodies = physics_world.remove_marked_bodies();
 
                 // Camera follows the box with some offset
                 let target_camera_pos = self.player.position + Vec2::new(50.0, 25.0);
@@ -396,6 +433,7 @@ impl Game for TestGame {
             TestGameState::Paused => {
                 if input.is_key_pressed(sapp::Keycode::P) {
                     self.game_state = TestGameState::Playing;
+                    self.requested_system_state = Some(SystemState::GamePlaying);
                 }
                 if input.is_key_pressed(sapp::Keycode::M) {
                     self.game_state = TestGameState::MainMenu;
@@ -406,7 +444,7 @@ impl Game for TestGame {
             }
             TestGameState::Dead => {
                 if input.is_key_pressed(sapp::Keycode::Enter) {
-                    self.reset_game(camera);
+                    self.reset_game(camera, physics_world);
                 }
                 if input.is_key_pressed(sapp::Keycode::Escape) {
                     self.game_state = TestGameState::MainMenu;
@@ -473,7 +511,7 @@ impl Game for TestGame {
                     self.completed_fx_started = false;
                 }
                 if input.is_key_pressed(sapp::Keycode::Enter) {
-                    self.reset_game(camera);
+                    self.reset_game(camera, physics_world);
                     self.completed_fx_started = false;
                 }
             }
@@ -517,40 +555,11 @@ impl Game for TestGame {
                 let border = Quad::new(self.world_min.x, self.world_min.y, world_size.x, world_size.y, Vec4::new(0.1, 0.1, 0.3, 0.9)).with_outline();
                 renderer.draw_quad(&border);
 
-                for astroid in &self.asteroids {
+                for astroid in self.asteroids.values() {
                     renderer.draw_circle(astroid);
-                }
-                let astroid_colliders = self.get_astroid_colliders();
-                for astroid_collider in astroid_colliders {
-                    let (radius) = match astroid_collider.shape {
-                        CollisionShape::Rectangle { width, height } => (width - height),
-                        CollisionShape::Circle { radius } => (radius), // Use diameter for both dimensions
-                    };
-
-                    let astroid_collider_outline = Circle::new(
-                        astroid_collider.position.x, 
-                        astroid_collider.position.y, 
-                        radius, 
-                        Vec4::new(1.0, 0.0, 0.0, 1.0)).with_outline();
-                    renderer.draw_circle(&astroid_collider_outline);
                 }
 
                 renderer.draw_sprite(&self.player);
-
-                let player_collider = &self.get_player_collider();
-                let (width, height) = match player_collider.shape {
-                    CollisionShape::Rectangle { width, height } => (width, height),
-                    CollisionShape::Circle { radius } => (radius * 2.0, radius * 2.0), // Use diameter for both dimensions
-                };
-                
-                let player_collider_outline = Quad::new(
-                    player_collider.position.x, 
-                    player_collider.position.y, 
-                    width, 
-                    height, 
-                    Vec4::new(1.0, 0.0, 0.0, 1.0)).with_outline();
-
-                renderer.draw_quad(&player_collider_outline);
 
                 if let (Some(text), Some(msg)) = (&self.text, &self.hud_msg) {
                     if self.hud_timer > 0.0 {
@@ -563,7 +572,7 @@ impl Game for TestGame {
             }
             TestGameState::Paused => {
                 // Render game in background + pause overlay
-                for astroid in &self.asteroids {
+                for astroid in self.asteroids.values() {
                     renderer.draw_circle(astroid);
                 }
                 renderer.draw_sprite(&self.player);
@@ -628,7 +637,7 @@ impl Game for TestGame {
             }
             sapp::EventType::Focused => {
                 println!("Game active!");
-                self.requested_system_state = Some(SystemState::GameActive);
+                self.requested_system_state = Some(SystemState::GamePlaying);
             }
             _ => {}
         }

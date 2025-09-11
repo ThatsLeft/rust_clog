@@ -45,7 +45,6 @@ impl Collider {
             is_trigger: false,
         }
     }
-    
 }
 
 pub fn check_collision(a: &Collider, b: &Collider) -> bool {
@@ -91,10 +90,16 @@ pub fn check_collision_with_point(a: &Collider, b: &Collider) -> CollisionResult
 }
 
 fn aabb_vs_aabb(pos1: Vec2, w1: f32, h1: f32, pos2: Vec2, w2: f32, h2: f32) -> bool {
-    (pos1.x < pos2.x + w2) && 
-    (pos1.x + w1 > pos2.x) && 
-    (pos1.y < pos2.y + h2) && 
-    (pos1.y + h1 > pos2.y)
+    // Convert from center position to min/max bounds
+    let min1 = Vec2::new(pos1.x - w1 / 2.0, pos1.y - h1 / 2.0);
+    let max1 = Vec2::new(pos1.x + w1 / 2.0, pos1.y + h1 / 2.0);
+    let min2 = Vec2::new(pos2.x - w2 / 2.0, pos2.y - h2 / 2.0);
+    let max2 = Vec2::new(pos2.x + w2 / 2.0, pos2.y + h2 / 2.0);
+    
+    (min1.x < max2.x) && 
+    (max1.x > min2.x) && 
+    (min1.y < max2.y) && 
+    (max1.y > min2.y)
 }
 
 fn circle_vs_circle(pos1: Vec2, r1: f32, pos2: Vec2, r2: f32) -> bool {
@@ -104,24 +109,34 @@ fn circle_vs_circle(pos1: Vec2, r1: f32, pos2: Vec2, r2: f32) -> bool {
 }
 
 fn aabb_vs_circle(rect_pos: Vec2, width: f32, height: f32, circle_pos: Vec2, radius: f32) -> bool {
-    let closest_x = circle_pos.x.max(rect_pos.x).min(rect_pos.x + width);
-    let closest_y = circle_pos.y.max(rect_pos.y).min(rect_pos.y + height);
+    // Convert rectangle from center position to min/max bounds
+    let rect_min = Vec2::new(rect_pos.x - width / 2.0, rect_pos.y - height / 2.0);
+    let rect_max = Vec2::new(rect_pos.x + width / 2.0, rect_pos.y + height / 2.0);
+    
+    let closest_x = circle_pos.x.max(rect_min.x).min(rect_max.x);
+    let closest_y = circle_pos.y.max(rect_min.y).min(rect_max.y);
     let distance_sq = (circle_pos - Vec2::new(closest_x, closest_y)).length_squared();
     distance_sq <= radius * radius
 }
 
 fn aabb_vs_aabb_with_point(pos1: Vec2, w1: f32, h1: f32, pos2: Vec2, w2: f32, h2: f32) -> CollisionResult {
-    let collided = (pos1.x < pos2.x + w2) &&
-                   (pos1.x + w1 > pos2.x) &&
-                   (pos1.y < pos2.y + h2) &&
-                   (pos1.y + h1 > pos2.y);
+    // Convert from center position to min/max bounds
+    let min1 = Vec2::new(pos1.x - w1 / 2.0, pos1.y - h1 / 2.0);
+    let max1 = Vec2::new(pos1.x + w1 / 2.0, pos1.y + h1 / 2.0);
+    let min2 = Vec2::new(pos2.x - w2 / 2.0, pos2.y - h2 / 2.0);
+    let max2 = Vec2::new(pos2.x + w2 / 2.0, pos2.y + h2 / 2.0);
+    
+    let collided = (min1.x < max2.x) &&
+                   (max1.x > min2.x) &&
+                   (min1.y < max2.y) &&
+                   (max1.y > min2.y);
     
     if collided {
         // Calculate overlap region center
-        let left = pos1.x.max(pos2.x);
-        let right = (pos1.x + w1).min(pos2.x + w2);
-        let top = pos1.y.max(pos2.y);
-        let bottom = (pos1.y + h1).min(pos2.y + h2);
+        let left = min1.x.max(min2.x);
+        let right = max1.x.min(max2.x);
+        let top = min1.y.max(min2.y);
+        let bottom = max1.y.min(max2.y);
         
         let contact_point = Vec2::new((left + right) * 0.5, (top + bottom) * 0.5);
         CollisionResult::hit(contact_point)
@@ -146,8 +161,12 @@ fn circle_vs_circle_with_point(pos1: Vec2, r1: f32, pos2: Vec2, r2: f32) -> Coll
 }
 
 fn aabb_vs_circle_with_point(rect_pos: Vec2, width: f32, height: f32, circle_pos: Vec2, radius: f32) -> CollisionResult {
-    let closest_x = circle_pos.x.max(rect_pos.x).min(rect_pos.x + width);
-    let closest_y = circle_pos.y.max(rect_pos.y).min(rect_pos.y + height);
+    // Convert rectangle from center position to min/max bounds
+    let rect_min = Vec2::new(rect_pos.x - width / 2.0, rect_pos.y - height / 2.0);
+    let rect_max = Vec2::new(rect_pos.x + width / 2.0, rect_pos.y + height / 2.0);
+    
+    let closest_x = circle_pos.x.max(rect_min.x).min(rect_max.x);
+    let closest_y = circle_pos.y.max(rect_min.y).min(rect_max.y);
     let closest_point = Vec2::new(closest_x, closest_y);
     let distance_sq = (circle_pos - closest_point).length_squared();
     let collided = distance_sq <= radius * radius;

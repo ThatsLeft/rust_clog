@@ -7,8 +7,8 @@ pub mod collision;
 pub mod texture;
 pub mod particle;
 pub mod text;
+pub mod physics;
 
-use glam::Vec4;
 use std::collections::HashMap;
 use sokol::gfx as sg;
 pub use app::*;
@@ -20,12 +20,16 @@ pub use collision::*;
 pub use texture::*;
 pub use particle::*;
 pub use text::*;
+pub use physics::*;
+
+use crate::engine::physics_world::PhysicsWorld;
 
 /// Game engine states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemState {
     Starting,
-    GameActive,
+    GamePlaying,
+    GamePaused,
     Background,
     Shutdown,
 }
@@ -100,21 +104,20 @@ impl GameConfig {
 pub trait Game {
     type State: GameState;
     fn config() -> GameConfig where Self: Sized;
-    
+   
     fn engine_render_loading(&mut self, renderer: &mut Renderer, progress: f32, camera: &mut Camera2D);
+   
+    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>, physics_world: &mut PhysicsWorld);
     
-
-    fn init(&mut self, config: &GameConfig, renderer: &mut Renderer, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>);
-    fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>);
-    
+    fn update(&mut self, dt: f32, input: &InputManager, camera: &mut Camera2D, animation_manager: &mut AnimationManager, particle_systems: &mut HashMap<String, ParticleSystem>, physics_world: &mut PhysicsWorld);
+   
     fn render(&mut self, renderer: &mut Renderer, camera: &mut Camera2D);
-    
+   
     fn handle_event(&mut self, event: &sokol::app::Event);
-    
+   
     fn request_system_state(&mut self) -> Option<SystemState>;
-    
+   
     fn request_background_color_change(&self) -> Option<sg::Color> {
         None  
     }
-    
 }

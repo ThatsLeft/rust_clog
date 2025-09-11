@@ -1,7 +1,9 @@
+use glam::Vec4;
 use sokol::{app as sapp, gfx as sg, glue as sglue};
 use std::ffi::{self, CString};
 use std::collections::HashMap;
-use crate::engine::{camera, AnimationManager, Camera2D, Game, GameConfig, InputManager, ParticleSystem, Renderer, SystemState};
+use crate::engine::physics_world::PhysicsWorld;
+use crate::engine::{camera, AnimationManager, Camera2D, Circle, CollisionShape, Game, GameConfig, InputManager, ParticleSystem, Quad, Renderer, SystemState};
 
 pub struct App<T: Game> {
     game: T,
@@ -17,7 +19,7 @@ struct AppState<T: Game> {
     camera: Camera2D,
     animation_manager: AnimationManager,
     particle_systems: HashMap<String, ParticleSystem>,
-
+    physics_world: PhysicsWorld,
 
     // Engine manages system state
     system_state: SystemState,
@@ -55,6 +57,7 @@ impl<T: Game> App<T> {
             camera: Camera2D::new(),
             animation_manager: AnimationManager::new(),
             particle_systems: HashMap::new(),
+            physics_world: PhysicsWorld::new(),
             system_state: SystemState::Starting,
             previous_system_state: SystemState::Starting,
             system_state_time: 0.0,
@@ -142,7 +145,7 @@ extern "C" fn init<T: Game>(user_data: *mut ffi::c_void) {
 
     // Let the game do its initialization
     let config = T::config();
-    state.game.init(&config, &mut state.renderer, &mut state.animation_manager, &mut state.particle_systems);
+    state.game.init(&config, &mut state.renderer, &mut state.animation_manager, &mut state.particle_systems, &mut state.physics_world);
 }
 
 extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
@@ -165,20 +168,25 @@ extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
     match state.system_state {
         SystemState::Starting => {
             state.system_state_time += dt;
-            state.loading_progress = (state.system_state_time / 5.0).min(1.0);
+            state.loading_progress = (state.system_state_time / 1.0).min(1.0);
             
             if state.loading_progress >= 1.0 {
-                change_system_state(state, SystemState::GameActive);
+                change_system_state(state, SystemState::GamePlaying);
             }
             
             render_loading_screen(state);
         }
         
-        SystemState::GameActive => {
+        SystemState::GamePlaying => {
             // Full game update and render
-            update_and_render_game(state, dt);
+            update_and_render_game(state, dt, false);
         }
         
+        SystemState::GamePaused => {
+            update_and_render_game(state, dt, true);
+
+        }
+
         SystemState::Background => {
             state.background_frame_counter += 1;
             
@@ -186,7 +194,7 @@ extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
             if state.background_frame_counter % state.background_frame_throttle == 0 {
                 // Reduced game update
                 state.game.update(dt * state.background_frame_throttle as f32, &state.input, 
-                                &mut state.camera, &mut state.animation_manager, &mut state.particle_systems);
+                                &mut state.camera, &mut state.animation_manager, &mut state.particle_systems, &mut state.physics_world);
                 
                 // Optional minimal rendering (or skip entirely)
                 render_background_state(state);
@@ -223,7 +231,7 @@ extern "C" fn event<T: Game>(event: *const sapp::Event, user_data: *mut ffi::c_v
             println!("System resumed");
             // Only resume if we were actually in background
             if state.system_state == SystemState::Background {
-                change_system_state(state, SystemState::GameActive);
+                change_system_state(state, SystemState::GamePlaying);
             }
             return;
         }
@@ -231,7 +239,14 @@ extern "C" fn event<T: Game>(event: *const sapp::Event, user_data: *mut ffi::c_v
     }
     
     match state.system_state {
-        SystemState::GameActive => {
+        SystemState::GamePlaying => {
+            // Process input for InputManager
+            process_input_events(state, event);
+            
+            // Pass event to game
+            state.game.handle_event(event);
+        }
+        SystemState::GamePaused => {
             // Process input for InputManager
             process_input_events(state, event);
             
@@ -264,47 +279,19 @@ extern "C" fn event<T: Game>(event: *const sapp::Event, user_data: *mut ffi::c_v
         }
     }
     
-    // Process other events based on current state
-    match state.system_state {
-        SystemState::GameActive => {
-            // Process input for InputManager
-            process_input_events(state, event);
-            
-            // Pass event to game
-            state.game.handle_event(event);
-        }
-        SystemState::Background => {
-            // Limited event processing in background
-            match event._type {
-                sapp::EventType::Resized => {
-                    state.camera.set_viewport_size(event.window_width as f32, event.window_height as f32);
-                }
-                _ => {
-                    // Still pass to game, but game should handle appropriately
-                    state.game.handle_event(event);
-                }
-            }
-        }
-        SystemState::Starting => {
-            // No game events during startup
-            match event._type {
-                sapp::EventType::Resized => {
-                    state.camera.set_viewport_size(event.window_width as f32, event.window_height as f32);
-                }
-                _ => {}
-            }
-        }
-        SystemState::Shutdown => {
-            // No event processing during shutdown
-        }
-    }
 }
 
 // -- system helpers --
-fn update_and_render_game<T: Game>(state: &mut AppState<T>, dt: f32) {
+fn update_and_render_game<T: Game>(state: &mut AppState<T>, dt: f32, pause_physics: bool) {
     // Full game update
     for system in state.particle_systems.values_mut() {
         system.update(dt);
+    }
+
+    // run physics step
+    if (!pause_physics){
+        state.physics_world.step(dt);
+        let _removed_bodies = state.physics_world.remove_marked_bodies();
     }
 
     // Remove finished, duration-based systems
@@ -317,8 +304,11 @@ fn update_and_render_game<T: Game>(state: &mut AppState<T>, dt: f32) {
     }
     
     state.game.update(dt, &state.input, &mut state.camera, 
-                    &mut state.animation_manager, &mut state.particle_systems);
+                    &mut state.animation_manager, &mut state.particle_systems, &mut state.physics_world);
     
+    // Clear physics events
+    state.physics_world.clear_collision_events();
+
     state.camera.update_shake(dt);
 
     // Update background color if needed
@@ -334,6 +324,34 @@ fn update_and_render_game<T: Game>(state: &mut AppState<T>, dt: f32) {
     });
     
     state.game.render(&mut state.renderer, &mut state.camera);
+    for body in state.physics_world.bodies() {
+        match body.collider.shape {
+            CollisionShape::Rectangle { width, height } => {
+                // Convert from center position (collider) to bottom-left position (quad)
+                let bottom_left_x = body.collider.position.x - width / 2.0;
+                let bottom_left_y = body.collider.position.y - height / 2.0;
+                
+                let rect_outline = Quad::new(
+                    bottom_left_x,
+                    bottom_left_y,
+                    width,
+                    height,
+                    Vec4::new(1.0, 0.0, 0.0, 1.0)
+                ).with_outline();
+                state.renderer.draw_quad(&rect_outline);
+            }
+            CollisionShape::Circle { radius } => {
+                // Circles use center positioning, so no conversion needed
+                let circle_outline = Circle::new(
+                    body.collider.position.x,
+                    body.collider.position.y,
+                    radius,
+                    Vec4::new(1.0, 0.0, 0.0, 1.0)
+                ).with_outline();
+                state.renderer.draw_circle(&circle_outline);
+            }
+        }
+    }
 
     for system in state.particle_systems.values_mut() {
         for particle in system.get_particles() {
@@ -381,14 +399,20 @@ fn is_valid_transition(from: SystemState, to: SystemState) -> bool {
     use SystemState::*;
     
     match (from, to) {
-        (Starting, GameActive) => true,
+        (Starting, GamePlaying) => true,
         (Starting, _) => false,
-        (GameActive, GameActive) => true,
-        (GameActive, Background) => true,
-        (GameActive, Shutdown) => true,
-        (GameActive, Starting) => false,
-        (Background, GameActive) => true,
+        (GamePlaying, GamePlaying) => true,
+        (GamePlaying, Background) => true,
+        (GamePlaying, Shutdown) => true,
+        (GamePlaying, Starting) => false,
+        (GamePlaying, GamePaused) => true,
+        (GamePaused, GamePlaying) => true,
+        (GamePaused, Background) => true,
+        (GamePaused, Shutdown) => true,
+        (Background, GamePlaying) => true,
         (Background, Shutdown) => true,
+        (Background, GamePaused) => true,
+        (GamePaused, _) => false,
         (Background, _) => false,
         (Shutdown, _) => false,
         (a, b) if a == b => {
@@ -428,7 +452,7 @@ fn change_system_state<T: Game>(state: &mut AppState<T>, new_state: SystemState)
                 println!("Entering background mode - throttling to every {} frames", 
                         state.background_frame_throttle);
             }
-            SystemState::GameActive => {
+            SystemState::GamePlaying => {
                 if state.previous_system_state == SystemState::Background {
                     println!("Resuming from background mode");
                 }
