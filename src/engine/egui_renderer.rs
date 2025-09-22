@@ -12,7 +12,6 @@ pub struct EguiRenderer {
     indices: Vec<u16>,
     textures: HashMap<egui::TextureId, sg::Image>,
     font_texture: Option<sg::Image>,
-    sampler: sg::Sampler,
     font_view: Option<sg::View>,
 }
 
@@ -64,7 +63,6 @@ impl EguiRenderer {
             indices: Vec::new(),
             textures: HashMap::new(),
             font_texture: None,
-            sampler,
             font_view: None,
         }
     }
