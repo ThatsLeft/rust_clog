@@ -1,5 +1,5 @@
+use crate::engine::{gravity::GravityField, Collider};
 use glam::Vec2;
-use crate::engine::{gravity::GravityField, Collider, CollisionShape};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BodyId(pub u32);
@@ -8,7 +8,7 @@ pub struct BodyId(pub u32);
 pub enum BodyType {
     Static,
     Dynamic,
-    Kinematic
+    Kinematic,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -43,7 +43,7 @@ pub struct RigidBody {
     pub collider: Collider,
     pub gravity_field: Option<GravityField>,
     pub marked_for_deletion: bool,
-    
+
     // Internal state
     pub(crate) force_accumulator: Vec2,
     pub(crate) is_sleeping: bool,
@@ -70,7 +70,7 @@ impl RigidBody {
             sleep_timer: 0.0,
         }
     }
-    
+
     /// Create a new static rigid body (walls, platforms)
     pub fn new_static(id: BodyId, position: Vec2, collider: Collider) -> Self {
         Self {
@@ -90,7 +90,7 @@ impl RigidBody {
             sleep_timer: 0.0,
         }
     }
-    
+
     /// Create a new kinematic rigid body (moving platforms)
     pub fn new_kinematic(id: BodyId, position: Vec2, collider: Collider) -> Self {
         Self {
@@ -104,7 +104,7 @@ impl RigidBody {
             collider,
             gravity_field: None,
             marked_for_deletion: false,
-            
+
             force_accumulator: Vec2::ZERO,
             is_sleeping: false,
             sleep_timer: 0.0,
@@ -114,7 +114,7 @@ impl RigidBody {
     pub fn mark_for_deletion(&mut self) {
         self.marked_for_deletion = true;
     }
-    
+
     /// Apply a force to this body (will be integrated next physics step)
     pub fn apply_force(&mut self, force: Vec2) {
         if self.body_type == BodyType::Dynamic {
@@ -122,7 +122,7 @@ impl RigidBody {
             self.wake_up();
         }
     }
-    
+
     /// Apply an impulse (instant velocity change)
     pub fn apply_impulse(&mut self, impulse: Vec2) {
         if self.body_type == BodyType::Dynamic {
@@ -130,7 +130,7 @@ impl RigidBody {
             self.wake_up();
         }
     }
-    
+
     /// Set velocity directly (useful for kinematic bodies)
     pub fn set_velocity(&mut self, velocity: Vec2) {
         if self.body_type != BodyType::Static {
@@ -140,7 +140,7 @@ impl RigidBody {
             }
         }
     }
-    
+
     /// Set position directly
     pub fn set_position(&mut self, position: Vec2) {
         self.position = position;
@@ -149,7 +149,7 @@ impl RigidBody {
             self.wake_up();
         }
     }
-    
+
     /// Wake up the body (stop it from sleeping)
     pub fn wake_up(&mut self) {
         if self.body_type == BodyType::Dynamic {
@@ -157,17 +157,17 @@ impl RigidBody {
             self.sleep_timer = 0.0;
         }
     }
-    
+
     /// Check if the body should go to sleep (performance optimization)
     pub fn should_sleep(&self) -> bool {
         const SLEEP_VELOCITY_THRESHOLD: f32 = 0.1;
         const SLEEP_TIME_THRESHOLD: f32 = 1.0;
-        
-        self.body_type == BodyType::Dynamic 
-            && self.velocity.length() < SLEEP_VELOCITY_THRESHOLD 
+
+        self.body_type == BodyType::Dynamic
+            && self.velocity.length() < SLEEP_VELOCITY_THRESHOLD
             && self.sleep_timer > SLEEP_TIME_THRESHOLD
     }
-    
+
     /// Get the current kinetic energy of the body
     pub fn kinetic_energy(&self) -> f32 {
         if self.mass.is_infinite() {
@@ -242,7 +242,7 @@ impl RigidBody {
         self.gravity_field = Some(gravity_field);
         self
     }
-    
+
     /// Add a gravity field to an existing body
     pub fn set_gravity_field(&mut self, gravity_field: Option<GravityField>) {
         self.gravity_field = gravity_field;

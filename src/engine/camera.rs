@@ -1,19 +1,19 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use glam::{Vec2, Mat4};
+use glam::{Mat4, Vec2};
 
 pub struct Camera2D {
-    pub position: Vec2,     // World position the camera is looking at
-    pub zoom: f32,          // Zoom level (1.0 = normal, 2.0 = zoomed in 2x)
-    pub rotation: f32,      // Camera rotation in radians
+    pub position: Vec2, // World position the camera is looking at
+    pub zoom: f32,      // Zoom level (1.0 = normal, 2.0 = zoomed in 2x)
+    pub rotation: f32,  // Camera rotation in radians
 
     shake_offset: Vec2,
     shake_intensity: f32,
     shake_duration: f32,
     shake_timer: f32,
-    
+
     view_projection: Mat4,
-    
+
     // Internal state
     transform_dirty: bool,
     viewport_width: f32,
@@ -42,10 +42,10 @@ impl Camera2D {
     pub fn update_shake(&mut self, dt: f32) {
         if self.shake_timer > 0.0 {
             self.shake_timer -= dt;
-            
+
             // Calculate shake strength (fades out over time)
             let shake_strength = (self.shake_timer / self.shake_duration) * self.shake_intensity;
-            
+
             // Random shake offset
             let mut hasher = DefaultHasher::new();
             let shake_timer = (self.shake_timer as f32 * 1000.0) as u32;
@@ -58,7 +58,7 @@ impl Camera2D {
                 random_angle.cos() * shake_strength,
                 random_angle.sin() * shake_strength,
             );
-            
+
             self.transform_dirty = true; // Need to recalculate matrix
         } else {
             // No more shake
@@ -91,16 +91,23 @@ impl Camera2D {
         // Create orthographic projection (maps world space to clip space)
         let half_width = self.viewport_width * 0.5 / self.zoom;
         let half_height = self.viewport_height * 0.5 / self.zoom;
-        
+
         let projection = Mat4::orthographic_rh(
-            -half_width, half_width,    // left, right
-            -half_height, half_height,  // bottom, top (flipped for screen space)
-            -1.0, 1.0                   // near, far
-        );        
+            -half_width,
+            half_width, // left, right
+            -half_height,
+            half_height, // bottom, top (flipped for screen space)
+            -1.0,
+            1.0, // near, far
+        );
 
         // Create view matrix (camera transform)
-        let effective_position = self.position + self.shake_offset;  // ADD shake offset
-        let translation = Mat4::from_translation(glam::Vec3::new(-effective_position.x, -effective_position.y, 0.0));
+        let effective_position = self.position + self.shake_offset; // ADD shake offset
+        let translation = Mat4::from_translation(glam::Vec3::new(
+            -effective_position.x,
+            -effective_position.y,
+            0.0,
+        ));
         let rotation = Mat4::from_rotation_z(-self.rotation);
         let view = rotation * translation;
 
@@ -108,7 +115,6 @@ impl Camera2D {
         self.view_projection = projection * view;
         self.transform_dirty = false;
     }
-    
 }
 
 impl Camera2D {
@@ -117,15 +123,15 @@ impl Camera2D {
         if self.transform_dirty {
             self.update_matrices();
         }
-        
+
         // Convert screen coordinates to normalized device coordinates (-1 to 1)
         let ndc_x = (screen_pos.x / self.viewport_width) * 2.0 - 1.0;
-        let ndc_y = -((screen_pos.y / self.viewport_height) * 2.0 - 1.0);  // ADD negative sign here
-        
+        let ndc_y = -((screen_pos.y / self.viewport_height) * 2.0 - 1.0); // ADD negative sign here
+
         // Transform by inverse view-projection matrix
         let inverse_vp = self.view_projection.inverse();
         let world_pos_4d = inverse_vp * glam::Vec4::new(ndc_x, ndc_y, 0.0, 1.0);
-        
+
         Vec2::new(world_pos_4d.x, world_pos_4d.y)
     }
 
@@ -133,14 +139,14 @@ impl Camera2D {
         if self.transform_dirty {
             self.update_matrices();
         }
-        
+
         // Transform world position by view-projection matrix
         let clip_pos = self.view_projection * glam::Vec4::new(world_pos.x, world_pos.y, 0.0, 1.0);
-        
+
         // Convert from normalized device coordinates to screen coordinates
         let screen_x = (clip_pos.x + 1.0) * 0.5 * self.viewport_width;
         let screen_y = (clip_pos.y + 1.0) * 0.5 * self.viewport_height;
-        
+
         Vec2::new(screen_x, screen_y)
     }
 
@@ -200,13 +206,35 @@ impl Camera2D {
     }
 
     pub fn view_half_extents(&self) -> Vec2 {
-        Vec2::new(self.viewport_width * 0.5 / self.zoom, self.viewport_height * 0.5 / self.zoom)
+        Vec2::new(
+            self.viewport_width * 0.5 / self.zoom,
+            self.viewport_height * 0.5 / self.zoom,
+        )
     }
 
     pub fn clamp_to_bounds(&mut self, min: Vec2, max: Vec2) {
         let half = self.view_half_extents();
-        let clamped_x = self.position.x.clamp(min.x + half.x, max.x - half.x);
-        let clamped_y = self.position.y.clamp(min.y + half.y, max.y - half.y);
+
+        // Only clamp if the world is larger than the view area
+        let clamp_min_x = min.x + half.x;
+        let clamp_max_x = max.x - half.x;
+        let clamp_min_y = min.y + half.y;
+        let clamp_max_y = max.y - half.y;
+
+        let clamped_x = if clamp_min_x <= clamp_max_x {
+            self.position.x.clamp(clamp_min_x, clamp_max_x)
+        } else {
+            // View is larger than world bounds, center camera
+            (min.x + max.x) * 0.5
+        };
+
+        let clamped_y = if clamp_min_y <= clamp_max_y {
+            self.position.y.clamp(clamp_min_y, clamp_max_y)
+        } else {
+            // View is larger than world bounds, center camera
+            (min.y + max.y) * 0.5
+        };
+
         self.set_position(Vec2::new(clamped_x, clamped_y));
     }
 
