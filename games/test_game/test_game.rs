@@ -681,6 +681,8 @@ impl Game for TestGame {
                 if self.asteroids.is_empty() {
                     self.game_state = TestGameState::Completed;
                 }
+
+                services.remove_marked_bodies();
             }
             TestGameState::Paused => {
                 if input.is_key_pressed(sapp::Keycode::P) {

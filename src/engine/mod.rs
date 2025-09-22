@@ -105,6 +105,9 @@ pub struct EngineServices<'a> {
 impl EngineServices<'_> {
     pub fn update_physics(&mut self, dt: f32) {
         self.physics.step(dt);
+    }
+
+    pub fn remove_marked_bodies(&mut self) {
         let _removed_bodies = self.physics.remove_marked_bodies();
         self.physics.clear_collision_events();
     }
