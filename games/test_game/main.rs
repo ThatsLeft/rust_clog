@@ -8,5 +8,6 @@ pub mod test_game;
 fn main() {
     let game = TestGame::new();
     let app = App::new(game);
+
     app.run();
 }

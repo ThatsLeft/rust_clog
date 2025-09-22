@@ -2,6 +2,8 @@ pub mod animation;
 pub mod app;
 pub mod camera;
 pub mod collision;
+pub mod debug;
+pub mod egui_renderer;
 pub mod graphics;
 pub mod input;
 pub mod particle;
@@ -9,10 +11,13 @@ pub mod physics;
 pub mod text;
 pub mod texture;
 
+use crate::engine::physics_world::PhysicsWorld;
+
 pub use animation::*;
 pub use app::*;
 pub use camera::*;
 pub use collision::*;
+pub use debug::*;
 use glam::Vec4;
 pub use graphics::*;
 pub use input::*;
@@ -22,8 +27,6 @@ use sokol::gfx as sg;
 use std::collections::HashMap;
 pub use text::*;
 pub use texture::*;
-
-use crate::engine::physics_world::PhysicsWorld;
 
 /// Game window configuration
 /// Implemented with builder
@@ -163,30 +166,32 @@ impl EngineServices<'_> {
     }
 
     pub fn render_physics_debug(&mut self) {
-        for body in self.physics.bodies() {
-            match body.collider.shape {
-                CollisionShape::Rectangle { width, height } => {
-                    let bottom_left_x = body.collider.position.x - width / 2.0;
-                    let bottom_left_y = body.collider.position.y - height / 2.0;
-                    let rect_outline = Quad::new(
-                        bottom_left_x,
-                        bottom_left_y,
-                        width,
-                        height,
-                        Vec4::new(1.0, 0.0, 0.0, 1.0),
-                    )
-                    .with_outline();
-                    self.renderer.draw_quad(&rect_outline);
-                }
-                CollisionShape::Circle { radius } => {
-                    let circle_outline = Circle::new(
-                        body.collider.position.x,
-                        body.collider.position.y,
-                        radius,
-                        Vec4::new(1.0, 0.0, 0.0, 1.0),
-                    )
-                    .with_outline();
-                    self.renderer.draw_circle(&circle_outline);
+        if debug_flags().is_collision_enabled() {
+            for body in self.physics.bodies() {
+                match body.collider.shape {
+                    CollisionShape::Rectangle { width, height } => {
+                        let bottom_left_x = body.collider.position.x - width / 2.0;
+                        let bottom_left_y = body.collider.position.y - height / 2.0;
+                        let rect_outline = Quad::new(
+                            bottom_left_x,
+                            bottom_left_y,
+                            width,
+                            height,
+                            Vec4::new(1.0, 0.0, 0.0, 1.0),
+                        )
+                        .with_outline();
+                        self.renderer.draw_quad(&rect_outline);
+                    }
+                    CollisionShape::Circle { radius } => {
+                        let circle_outline = Circle::new(
+                            body.collider.position.x,
+                            body.collider.position.y,
+                            radius,
+                            Vec4::new(1.0, 0.0, 0.0, 1.0),
+                        )
+                        .with_outline();
+                        self.renderer.draw_circle(&circle_outline);
+                    }
                 }
             }
         }

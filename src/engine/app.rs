@@ -1,7 +1,7 @@
 use crate::engine::physics_world::PhysicsWorld;
 use crate::engine::{
-    AnimationManager, Camera2D, EngineServices, Game, GameConfig, InputManager, ParticleSystem,
-    Renderer,
+    toggle_collision_debug, toggle_debug_panel, toggle_debug_text, AnimationManager, Camera2D,
+    DebugOverlay, EngineServices, Game, GameConfig, InputManager, ParticleSystem, Renderer,
 };
 use sokol::{app as sapp, gfx as sg, glue as sglue};
 use std::collections::HashMap;
@@ -22,6 +22,7 @@ struct AppState<T: Game> {
     animation_manager: AnimationManager,
     particle_systems: HashMap<String, ParticleSystem>,
     physics_world: PhysicsWorld,
+    debug_overlay: Option<DebugOverlay>,
 }
 
 impl<T: Game> App<T> {
@@ -49,6 +50,7 @@ impl<T: Game> App<T> {
             animation_manager: AnimationManager::new(),
             particle_systems: HashMap::new(),
             physics_world: PhysicsWorld::new(),
+            debug_overlay: None,
         });
 
         let user_data = Box::into_raw(state) as *mut ffi::c_void;
@@ -143,11 +145,18 @@ extern "C" fn init<T: Game>(user_data: *mut ffi::c_void) {
     // Let the game do its initialization
     let config = T::config();
     state.game.init(&config, &mut services);
+
+    state.debug_overlay = Some(DebugOverlay::new());
 }
 
 extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
     let state = unsafe { &mut *(user_data as *mut AppState<T>) };
     let dt = sapp::frame_duration() as f32;
+
+    if let Some(debug_overlay) = &mut state.debug_overlay {
+        debug_overlay.update_frame_stats(dt);
+        // debug_overlay.render();
+    }
 
     let mut services = EngineServices {
         physics: &mut state.physics_world,
@@ -175,6 +184,10 @@ extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
     state.game.render(&mut services);
     state.renderer.flush(&mut state.camera);
 
+    if let Some(debug_overlay) = &mut state.debug_overlay {
+        debug_overlay.render();
+    }
+
     sg::end_pass();
     sg::commit();
 
@@ -191,8 +204,35 @@ extern "C" fn event<T: Game>(event: *const sapp::Event, user_data: *mut ffi::c_v
     let state = unsafe { &mut *(user_data as *mut AppState<T>) };
     let event = unsafe { &*event };
 
-    process_input_events(state, event);
-    state.game.handle_event(event);
+    // Handle debug hotkeys
+    if event._type == sapp::EventType::KeyDown {
+        match event.key_code {
+            sapp::Keycode::F1 => {
+                toggle_debug_text();
+                return;
+            }
+            sapp::Keycode::F2 => {
+                toggle_collision_debug();
+                return;
+            }
+            sapp::Keycode::F3 => {
+                toggle_debug_panel();
+                return;
+            }
+            _ => {}
+        }
+    }
+
+    let egui_handled = if let Some(debug_overlay) = &mut state.debug_overlay {
+        debug_overlay.handle_event(event)
+    } else {
+        false
+    };
+
+    if !egui_handled {
+        process_input_events(state, event);
+        state.game.handle_event(event);
+    }
 }
 
 fn process_input_events<T: Game>(state: &mut AppState<T>, event: &sapp::Event) {

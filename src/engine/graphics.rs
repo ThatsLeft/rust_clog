@@ -1,14 +1,14 @@
-use sokol::gfx as sg;
 use glam::{Vec2, Vec4};
+use sokol::gfx as sg;
 use std::{collections::HashMap, mem};
 
 use crate::engine::{AnimationState, Camera2D, Particle, TextureManager};
 
 #[repr(C)]
-struct Vertex {
-    pos: [f32; 2],
-    texcoord: [f32; 2],
-    color: [f32; 4],
+pub struct Vertex {
+    pub pos: [f32; 2],
+    pub texcoord: [f32; 2],
+    pub color: [f32; 4],
 }
 
 #[repr(C)]
@@ -17,7 +17,7 @@ struct Uniforms {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum PrimitiveType {
+pub enum PrimitiveType {
     Triangles,
     Lines,
 }
@@ -27,7 +27,7 @@ pub struct Quad {
     pub position: Vec2,
     pub size: Vec2,
     pub color: Vec4,
-    pub outline_only: bool
+    pub outline_only: bool,
 }
 
 impl Quad {
@@ -36,7 +36,7 @@ impl Quad {
             position: Vec2::new(x, y),
             size: Vec2::new(width, height),
             color,
-            outline_only: false
+            outline_only: false,
         }
     }
 
@@ -62,7 +62,7 @@ impl Circle {
             radius,
             color,
             segments: 32, // Default to 32 segments for smooth appearance,
-            outline_only: false
+            outline_only: false,
         }
     }
 
@@ -70,7 +70,7 @@ impl Circle {
         self.outline_only = true;
         self
     }
-    
+
     pub fn with_segments(mut self, segments: u32) -> Self {
         self.segments = segments.max(3); // Minimum 3 segments for a triangle
         self
@@ -81,14 +81,14 @@ impl Circle {
 pub struct Sprite {
     pub position: Vec2,
     pub size: Vec2,
-    pub uv: Vec4,                  
-    pub color: Vec4,               
+    pub uv: Vec4,
+    pub color: Vec4,
     pub rotation: f32,
     pub texture: Option<sg::Image>,
     pub texture_name: String,
     pub animation_state: Option<AnimationState>,
     pub flip_x: bool,
-    pub flip_y: bool, 
+    pub flip_y: bool,
 }
 
 impl Sprite {
@@ -162,7 +162,7 @@ struct DrawBatch {
     texture: sg::Image,
     start_index: usize,
     index_count: usize,
-    primitive_type: PrimitiveType
+    primitive_type: PrimitiveType,
 }
 
 pub struct Renderer {
@@ -205,8 +205,8 @@ impl Renderer {
 
         // Create sampler for texture filtering
         self.sampler = sg::make_sampler(&sg::SamplerDesc {
-            min_filter: sg::Filter::Nearest,  // or Nearest for pixel art
-            mag_filter: sg::Filter::Nearest,  // or Nearest for pixel art
+            min_filter: sg::Filter::Nearest, // or Nearest for pixel art
+            mag_filter: sg::Filter::Nearest, // or Nearest for pixel art
             wrap_u: sg::Wrap::ClampToEdge,
             wrap_v: sg::Wrap::ClampToEdge,
             ..Default::default()
@@ -222,7 +222,7 @@ struct vs_in {
     float2 texcoord : TEXCOORD;
     float4 color    : COLOR;
 };
-    
+
 struct vs_out {
     float4 position : SV_Position;
     float2 texcoord : TEXCOORD;
@@ -264,7 +264,7 @@ struct vs_in {
     float2 texcoord : TEXCOORD;
     float4 color    : COLOR;
 };
-    
+
 struct vs_out {
     float4 position : SV_Position;
     float4 color    : COLOR;
@@ -291,7 +291,7 @@ float4 main(ps_in inp) : SV_Target0 {
     return inp.color;
 }
 \0";
-        
+
         let texture_shader = sg::make_shader(&sg::ShaderDesc {
             vertex_func: sg::ShaderFunction {
                 source: textured_vs_source.as_ptr() as *const i8,
@@ -351,10 +351,10 @@ float4 main(ps_in inp) : SV_Target0 {
                 sg::ShaderView {
                     texture: sg::ShaderTextureView {
                         stage: sg::ShaderStage::Fragment,
-                        image_type: sg::ImageType::Dim2,  // 2D texture
+                        image_type: sg::ImageType::Dim2, // 2D texture
                         sample_type: sg::ImageSampleType::Float,
                         multisampled: false,
-                        hlsl_register_t_n: 0,  // Maps to register(t0) in HLSL
+                        hlsl_register_t_n: 0, // Maps to register(t0) in HLSL
                         msl_texture_n: 0,
                         wgsl_group1_binding_n: 0,
                     },
@@ -395,7 +395,7 @@ float4 main(ps_in inp) : SV_Target0 {
                 sg::ShaderSampler {
                     stage: sg::ShaderStage::Fragment,
                     sampler_type: sg::SamplerType::Filtering,
-                    hlsl_register_s_n: 0,  // Maps to register(s0) in HLSL
+                    hlsl_register_s_n: 0, // Maps to register(s0) in HLSL
                     ..Default::default()
                 },
                 // Fill remaining with defaults (16 total)
@@ -421,7 +421,7 @@ float4 main(ps_in inp) : SV_Target0 {
                     stage: sg::ShaderStage::Fragment,
                     view_slot: 0,
                     sampler_slot: 0,
-                    glsl_name: std::ptr::null()
+                    glsl_name: std::ptr::null(),
                 },
                 sg::ShaderTextureSamplerPair::default(),
                 sg::ShaderTextureSamplerPair::default(),
@@ -437,7 +437,7 @@ float4 main(ps_in inp) : SV_Target0 {
                 sg::ShaderTextureSamplerPair::default(),
                 sg::ShaderTextureSamplerPair::default(),
                 sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default()
+                sg::ShaderTextureSamplerPair::default(),
             ],
             ..Default::default()
         });
@@ -609,10 +609,10 @@ float4 main(ps_in inp) : SV_Target0 {
         });
 
         self.line_pipeline = sg::make_pipeline(&sg::PipelineDesc {
-            shader: colored_shader,  // Reuse the same colored shader
-            layout: vertex_layout,   // Same vertex layout
+            shader: colored_shader, // Reuse the same colored shader
+            layout: vertex_layout,  // Same vertex layout
             index_type: sg::IndexType::Uint16,
-            primitive_type: sg::PrimitiveType::Lines,  // Only this changes
+            primitive_type: sg::PrimitiveType::Lines, // Only this changes
             cull_mode: sg::CullMode::None,
             depth: sg::DepthState {
                 write_enabled: false,
@@ -673,7 +673,6 @@ float4 main(ps_in inp) : SV_Target0 {
         self.bind.samplers[0] = self.sampler;
 
         println!("Renderer initialized with shaders and buffers");
-
     }
 
     pub fn begin_frame(&mut self) {
@@ -748,7 +747,7 @@ float4 main(ps_in inp) : SV_Target0 {
                 size: index_bytes,
             },
         );
-        
+
         // Setup uniforms
         let view_proj = camera.get_view_projection_matrix();
         let uniforms = Uniforms {
@@ -779,7 +778,7 @@ float4 main(ps_in inp) : SV_Target0 {
                 self.view_cache.insert(batch.texture.id, new_view);
                 new_view
             };
-            
+
             self.bind.views[0] = view;
 
             self.bind.samplers[0] = self.sampler;
@@ -787,10 +786,13 @@ float4 main(ps_in inp) : SV_Target0 {
             // Apply pipeline and bindings
             sg::apply_pipeline(pipeline);
             sg::apply_bindings(&self.bind);
-            sg::apply_uniforms(0, &sg::Range {
-                ptr: &uniforms as *const _ as *const _,
-                size: mem::size_of::<Uniforms>(),
-            });
+            sg::apply_uniforms(
+                0,
+                &sg::Range {
+                    ptr: &uniforms as *const _ as *const _,
+                    size: mem::size_of::<Uniforms>(),
+                },
+            );
 
             // Draw this batch
             sg::draw(batch.start_index, batch.index_count, 1);
@@ -800,19 +802,26 @@ float4 main(ps_in inp) : SV_Target0 {
     fn add_batch(&mut self, texture: sg::Image, start_index: usize, index_count: usize) {
         self.add_batch_with_type(texture, start_index, index_count, PrimitiveType::Triangles);
     }
-    
-    fn add_batch_with_type(&mut self, texture: sg::Image, start_index: usize, index_count: usize, primitive_type: PrimitiveType) {
+
+    fn add_batch_with_type(
+        &mut self,
+        texture: sg::Image,
+        start_index: usize,
+        index_count: usize,
+        primitive_type: PrimitiveType,
+    ) {
         // Check if we can merge with the last batch (same texture AND same primitive type)
         if let Some(last_batch) = self.batches.last_mut() {
             // Only merge if EVERYTHING matches: texture, primitive type, AND indices are contiguous
-            if last_batch.texture.id == texture.id && 
+            if last_batch.texture.id == texture.id &&
                last_batch.primitive_type as u8 == primitive_type as u8 &&  // Exact match
-               last_batch.start_index + last_batch.index_count == start_index {
+               last_batch.start_index + last_batch.index_count == start_index
+            {
                 last_batch.index_count += index_count;
                 return;
             }
         }
-    
+
         // Create new batch - no merging possible
         self.batches.push(DrawBatch {
             texture,
@@ -828,105 +837,157 @@ impl Renderer {
     pub fn draw_quad(&mut self, quad: &Quad) {
         let start_vertex = self.vertices.len() as u16;
         let start_index = self.indices.len();
-    
+
         let x1 = quad.position.x;
         let y1 = quad.position.y;
         let x2 = quad.position.x + quad.size.x;
         let y2 = quad.position.y + quad.size.y;
-        
+
         let color = [quad.color.x, quad.color.y, quad.color.z, quad.color.w];
-    
+
         // Add vertices (same for both filled and outline)
-        self.vertices.push(Vertex { pos: [x1, y1], texcoord: [0.0, 0.0], color });
-        self.vertices.push(Vertex { pos: [x2, y1], texcoord: [1.0, 0.0], color });
-        self.vertices.push(Vertex { pos: [x2, y2], texcoord: [1.0, 1.0], color });
-        self.vertices.push(Vertex { pos: [x1, y2], texcoord: [0.0, 1.0], color });
-    
+        self.vertices.push(Vertex {
+            pos: [x1, y1],
+            texcoord: [0.0, 0.0],
+            color,
+        });
+        self.vertices.push(Vertex {
+            pos: [x2, y1],
+            texcoord: [1.0, 0.0],
+            color,
+        });
+        self.vertices.push(Vertex {
+            pos: [x2, y2],
+            texcoord: [1.0, 1.0],
+            color,
+        });
+        self.vertices.push(Vertex {
+            pos: [x1, y2],
+            texcoord: [0.0, 1.0],
+            color,
+        });
+
         if quad.outline_only {
             // Line indices: connect the 4 corners in a loop
             let line_indices = [
-                start_vertex, start_vertex + 1,     // top edge
-                start_vertex + 1, start_vertex + 2, // right edge  
-                start_vertex + 2, start_vertex + 3, // bottom edge
-                start_vertex + 3, start_vertex,     // left edge
+                start_vertex,
+                start_vertex + 1, // top edge
+                start_vertex + 1,
+                start_vertex + 2, // right edge
+                start_vertex + 2,
+                start_vertex + 3, // bottom edge
+                start_vertex + 3,
+                start_vertex, // left edge
             ];
             self.indices.extend_from_slice(&line_indices);
-            self.add_batch_with_type(self.texture_manager.get_white_texture(), start_index, 8, PrimitiveType::Lines);
+            self.add_batch_with_type(
+                self.texture_manager.get_white_texture(),
+                start_index,
+                8,
+                PrimitiveType::Lines,
+            );
         } else {
             // Triangle indices
             let triangle_indices = [
-                start_vertex, start_vertex + 1, start_vertex + 2,
-                start_vertex, start_vertex + 2, start_vertex + 3,
+                start_vertex,
+                start_vertex + 1,
+                start_vertex + 2,
+                start_vertex,
+                start_vertex + 2,
+                start_vertex + 3,
             ];
             self.indices.extend_from_slice(&triangle_indices);
-            self.add_batch_with_type(self.texture_manager.get_white_texture(), start_index, 6, PrimitiveType::Triangles);
+            self.add_batch_with_type(
+                self.texture_manager.get_white_texture(),
+                start_index,
+                6,
+                PrimitiveType::Triangles,
+            );
         }
     }
-    
+
     pub fn draw_circle(&mut self, circle: &Circle) {
         if circle.outline_only {
             let start_vertex = self.vertices.len() as u16;
             let start_index = self.indices.len();
-            let color = [circle.color.x, circle.color.y, circle.color.z, circle.color.w];
-            
+            let color = [
+                circle.color.x,
+                circle.color.y,
+                circle.color.z,
+                circle.color.w,
+            ];
+
             // Add vertices around circumference only (no center)
             for i in 0..circle.segments {
                 let angle = (i as f32 / circle.segments as f32) * 2.0 * std::f32::consts::PI;
                 let x = circle.center.x + angle.cos() * circle.radius;
                 let y = circle.center.y + angle.sin() * circle.radius;
-                
-                self.vertices.push(Vertex { 
+
+                self.vertices.push(Vertex {
                     pos: [x, y],
                     texcoord: [0.5, 0.5],
-                    color 
+                    color,
                 });
             }
-            
+
             // Connect consecutive vertices with lines
             for i in 0..circle.segments {
                 let next = (i + 1) % circle.segments;
-                self.indices.extend_from_slice(&[
-                    start_vertex + i as u16,
-                    start_vertex + next as u16,
-                ]);
+                self.indices
+                    .extend_from_slice(&[start_vertex + i as u16, start_vertex + next as u16]);
             }
-    
+
             let line_count = circle.segments * 2;
-            self.add_batch_with_type(self.texture_manager.get_white_texture(), start_index, line_count as usize, PrimitiveType::Lines);
+            self.add_batch_with_type(
+                self.texture_manager.get_white_texture(),
+                start_index,
+                line_count as usize,
+                PrimitiveType::Lines,
+            );
         } else {
             // Your existing filled circle code
             let center_vertex = self.vertices.len() as u16;
             let start_index = self.indices.len();
-            let color = [circle.color.x, circle.color.y, circle.color.z, circle.color.w];
-            
-            self.vertices.push(Vertex { 
-                pos: [circle.center.x, circle.center.y], 
+            let color = [
+                circle.color.x,
+                circle.color.y,
+                circle.color.z,
+                circle.color.w,
+            ];
+
+            self.vertices.push(Vertex {
+                pos: [circle.center.x, circle.center.y],
                 texcoord: [0.5, 0.5],
-                color 
+                color,
             });
-            
+
             for i in 0..circle.segments {
                 let angle = (i as f32 / circle.segments as f32) * 2.0 * std::f32::consts::PI;
                 let x = circle.center.x + angle.cos() * circle.radius;
                 let y = circle.center.y + angle.sin() * circle.radius;
-                
-                self.vertices.push( Vertex { 
+
+                self.vertices.push(Vertex {
                     pos: [x, y],
                     texcoord: [0.5, 0.5],
-                    color 
+                    color,
                 });
             }
-            
+
             let triangle_count = circle.segments * 3;
             for i in 0..circle.segments {
                 let next = (i + 1) % circle.segments;
                 self.indices.extend_from_slice(&[
-                    center_vertex,                    
-                    center_vertex + 1 + i as u16,    
-                    center_vertex + 1 + next as u16, 
+                    center_vertex,
+                    center_vertex + 1 + i as u16,
+                    center_vertex + 1 + next as u16,
                 ]);
             }
-            self.add_batch_with_type(self.texture_manager.get_white_texture(), start_index, triangle_count as usize, PrimitiveType::Triangles);
+            self.add_batch_with_type(
+                self.texture_manager.get_white_texture(),
+                start_index,
+                triangle_count as usize,
+                PrimitiveType::Triangles,
+            );
         }
     }
 
@@ -936,8 +997,10 @@ impl Renderer {
 
         // Determine which texture to use
         // let texture = sprite.texture.unwrap_or(self.texture_manager.get_white_texture());
-        let texture = self.get_texture(&sprite.texture_name).unwrap_or(self.texture_manager.get_white_texture());
-        
+        let texture = self
+            .get_texture(&sprite.texture_name)
+            .unwrap_or(self.texture_manager.get_white_texture());
+
         // Create 4 vertices for the sprite quad
         let half_size = sprite.size * 0.5;
         let cos_rot = sprite.rotation.cos();
@@ -951,10 +1014,10 @@ impl Renderer {
         ];
 
         let mut uvs = [
-            Vec2::new(sprite.uv.x, sprite.uv.y),                           // Top-left UV
-            Vec2::new(sprite.uv.x + sprite.uv.z, sprite.uv.y),           // Top-right UV
+            Vec2::new(sprite.uv.x, sprite.uv.y),               // Top-left UV
+            Vec2::new(sprite.uv.x + sprite.uv.z, sprite.uv.y), // Top-right UV
             Vec2::new(sprite.uv.x + sprite.uv.z, sprite.uv.y + sprite.uv.w), // Bottom-right UV
-            Vec2::new(sprite.uv.x, sprite.uv.y + sprite.uv.w),           // Bottom-left UV
+            Vec2::new(sprite.uv.x, sprite.uv.y + sprite.uv.w), // Bottom-left UV
         ];
 
         // Apply flipping by swapping UV coordinates
@@ -967,12 +1030,17 @@ impl Renderer {
             uvs.swap(1, 2); // Swap top-right with bottom-right
         }
 
-        let color = [sprite.color.x, sprite.color.y, sprite.color.z, sprite.color.w];
+        let color = [
+            sprite.color.x,
+            sprite.color.y,
+            sprite.color.z,
+            sprite.color.w,
+        ];
 
         // Add vertices with rotation applied
         for i in 0..4 {
             let local_pos = local_positions[i];
-            
+
             // Apply rotation
             let rotated_pos = if sprite.rotation != 0.0 {
                 Vec2::new(
@@ -995,15 +1063,23 @@ impl Renderer {
 
         // Add indices for two triangles
         let indices = [
-            start_vertex, start_vertex + 1, start_vertex + 2,
-            start_vertex, start_vertex + 2, start_vertex + 3,
+            start_vertex,
+            start_vertex + 1,
+            start_vertex + 2,
+            start_vertex,
+            start_vertex + 2,
+            start_vertex + 3,
         ];
         self.indices.extend_from_slice(&indices);
         self.add_batch(texture, start_index, 6);
     }
 
     // ADD texture loading method:
-    pub fn load_texture(&mut self, name: &str, path: &str) -> Result<sg::Image, Box<dyn std::error::Error>> {
+    pub fn load_texture(
+        &mut self,
+        name: &str,
+        path: &str,
+    ) -> Result<sg::Image, Box<dyn std::error::Error>> {
         self.texture_manager.load_texture(name, path)
     }
 
@@ -1015,14 +1091,14 @@ impl Renderer {
         let size = 4.0; // Small particle size
         let alpha = particle.lifetime / particle.max_lifetime; // Fade out
         let color = Vec4::new(particle.color.x, particle.color.y, particle.color.z, alpha);
-        
+
         let quad = Quad::new(
             particle.position.x - size * 0.5,
             particle.position.y - size * 0.5,
-            size, size,
-            color
+            size,
+            size,
+            color,
         );
         self.draw_quad(&quad);
     }
-
 }

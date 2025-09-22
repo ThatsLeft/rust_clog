@@ -5,11 +5,14 @@ use crate::engine::{
 };
 use glam::{Vec2, Vec4};
 use rand::Rng;
-use rusclog::engine::{
-    gravity::{GravityFalloff, GravityField},
-    physics_world::PhysicsWorld,
-    rigid_body::{BodyId, RigidBody},
-    EngineServices,
+use rusclog::{
+    debug_print,
+    engine::{
+        gravity::{GravityFalloff, GravityField},
+        physics_world::PhysicsWorld,
+        rigid_body::{BodyId, RigidBody},
+        EngineServices,
+    },
 };
 use sokol::{
     app::{self as sapp},
@@ -238,7 +241,18 @@ impl TestGame {
             let mut t = text.clone();
             t.set_scale(2.5);
             t.set_color(Vec4::new(1.0, 0.8, 0.2, 1.0));
-            t.draw_text_world(services.renderer, Vec2::new(-120.0, 80.0), "ASTEROIDS");
+
+            let title_size = t.measure_single_line_px("ASTEROIDS");
+            // Calculate centered position
+            let center_x = 0.0; // Your desired center point (world coordinates)
+            let center_y = 80.0;
+            let centered_pos = Vec2::new(
+                center_x - title_size.x * 0.5, // Move left by half the width
+                center_y,                      // Keep the same Y
+            );
+
+            // Draw at the calculated position
+            t.draw_text_world(services.renderer, centered_pos, "ASTEROIDS");
 
             t.set_scale(1.5);
             t.set_color(Vec4::new(0.8, 0.8, 0.8, 1.0));
@@ -254,7 +268,7 @@ impl TestGame {
             t.set_color(Vec4::new(0.6, 0.6, 0.6, 1.0));
             t.draw_text_world(
                 services.renderer,
-                Vec2::new(-80.0, -100.0),
+                Vec2::new(-120.0, -100.0),
                 "Initializing...",
             );
         }
@@ -370,9 +384,9 @@ impl Game for TestGame {
         for texture_name in &self.texture_names {
             let path = format!("assets/{}.png", texture_name);
             if let Ok(_) = services.renderer.load_texture(texture_name, &path) {
-                println!("Loaded texture: {}", texture_name);
+                debug_print!("Loaded texture: {}", texture_name);
             } else {
-                eprintln!("Failed to load texture: {}", texture_name);
+                debug_print!("Failed to load texture: {}", texture_name);
             }
         }
 
@@ -606,7 +620,7 @@ impl Game for TestGame {
                     } else {
                         // No thrust - turn off animation and thruster
                         self.player.change_texture("ship".to_string());
-                        self.player.size = Vec2::new(32.0, 32.0);
+                        self.player.size = Vec2::new(64.0, 64.0);
                         self.player.uv = Vec4::new(0.0, 0.0, 1.0, 1.0);
                         self.player_animation = false;
                         services.stop_animation(&mut self.player);
