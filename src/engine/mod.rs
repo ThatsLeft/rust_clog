@@ -207,13 +207,6 @@ pub trait Game {
     where
         Self: Sized;
 
-    fn engine_render_loading(
-        &mut self,
-        renderer: &mut Renderer,
-        progress: f32,
-        camera: &mut Camera2D,
-    );
-
     fn init(&mut self, config: &GameConfig, services: &mut EngineServices);
 
     fn update(&mut self, dt: f32, input: &InputManager, services: &mut EngineServices);
@@ -223,10 +216,6 @@ pub trait Game {
     fn handle_event(&mut self, event: &sokol::app::Event);
 
     fn request_background_color_change(&self) -> Option<sg::Color> {
-        None
-    }
-
-    fn get_loading_progress(&self) -> Option<f32> {
         None
     }
 }

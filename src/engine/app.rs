@@ -149,22 +149,6 @@ extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
     let state = unsafe { &mut *(user_data as *mut AppState<T>) };
     let dt = sapp::frame_duration() as f32;
 
-    if let Some(loading_progress) = state.game.get_loading_progress() {
-        sg::begin_pass(&sg::Pass {
-            action: state.pass_action,
-            swapchain: sglue::swapchain(),
-            ..Default::default()
-        });
-
-        state
-            .game
-            .engine_render_loading(&mut state.renderer, loading_progress, &mut state.camera);
-        state.renderer.flush(&mut state.camera);
-        sg::end_pass();
-        sg::commit();
-        return;
-    }
-
     let mut services = EngineServices {
         physics: &mut state.physics_world,
         particles: &mut state.particle_systems,
@@ -173,18 +157,15 @@ extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
         renderer: &mut state.renderer,
     };
 
-    // Game decides what to update
+    // Game always updates and renders - no special loading path
     state.game.update(dt, &state.input, &mut services);
-
-    // Update camera shake (always needed)
     services.update_camera_shake(dt);
 
-    // Update background color if requested
     if let Some(new_color) = state.game.request_background_color_change() {
         state.pass_action.colors[0].clear_value = new_color;
     }
 
-    // Full rendering
+    // Single render path
     sg::begin_pass(&sg::Pass {
         action: state.pass_action,
         swapchain: sglue::swapchain(),

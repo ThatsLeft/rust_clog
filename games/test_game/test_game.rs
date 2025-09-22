@@ -9,7 +9,7 @@ use rusclog::engine::{
     gravity::{GravityFalloff, GravityField},
     physics_world::PhysicsWorld,
     rigid_body::{BodyId, RigidBody},
-    EngineServices, Renderer,
+    EngineServices,
 };
 use sokol::{
     app::{self as sapp},
@@ -20,6 +20,7 @@ use std::collections::HashMap;
 /// The current games statemachine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestGameState {
+    InitialLoading,
     MainMenu,
     Playing,
     Paused,
@@ -47,6 +48,8 @@ pub struct TestGame {
     text: Option<crate::engine::TextRenderer>,
     hud_msg: Option<String>,
     hud_timer: f32,
+    loading_timer: f32,
+    loading_duration: f32,
 }
 
 // Functions and functionality for the test game
@@ -88,10 +91,12 @@ impl TestGame {
             text: None,
             hud_msg: None,
             hud_timer: 0.0,
+            loading_timer: 0.0,
+            loading_duration: 2.0,
         }
     }
 
-    fn update_background_color(&mut self, new_color: sg::Color) {
+    fn _update_background_color(&mut self, new_color: sg::Color) {
         self.current_background = new_color;
         self.new_background = true;
     }
@@ -205,6 +210,135 @@ impl TestGame {
         let key = format!("confetti_{}", rand::rng().random_range(0..1_000_000));
         particle_systems.insert(key, sys);
     }
+
+    fn render_startup_loading(&mut self, services: &mut EngineServices) {
+        // Dark space background
+        let bg = Quad::new(-400.0, -300.0, 800.0, 600.0, Vec4::new(0.0, 0.0, 0.1, 1.0));
+        services.renderer.draw_quad(&bg);
+
+        // Calculate progress
+        let progress = (self.loading_timer / self.loading_duration).min(1.0);
+
+        // Loading bar background
+        let bar_bg = Quad::new(-200.0, -20.0, 400.0, 40.0, Vec4::new(0.2, 0.2, 0.3, 1.0));
+        services.renderer.draw_quad(&bar_bg);
+
+        // Loading bar fill
+        let bar_fill = Quad::new(
+            -200.0,
+            -20.0,
+            400.0 * progress,
+            40.0,
+            Vec4::new(0.0, 0.6, 1.0, 1.0),
+        );
+        services.renderer.draw_quad(&bar_fill);
+
+        // Title and text
+        if let Some(text) = &self.text {
+            let mut t = text.clone();
+            t.set_scale(2.5);
+            t.set_color(Vec4::new(1.0, 0.8, 0.2, 1.0));
+            t.draw_text_world(services.renderer, Vec2::new(-120.0, 80.0), "ASTEROIDS");
+
+            t.set_scale(1.5);
+            t.set_color(Vec4::new(0.8, 0.8, 0.8, 1.0));
+            let percent = (progress * 100.0) as i32;
+            t.draw_text_world(
+                services.renderer,
+                Vec2::new(-40.0, -60.0),
+                &format!("{}%", percent),
+            );
+
+            // Loading status text
+            t.set_scale(1.0);
+            t.set_color(Vec4::new(0.6, 0.6, 0.6, 1.0));
+            t.draw_text_world(
+                services.renderer,
+                Vec2::new(-80.0, -100.0),
+                "Initializing...",
+            );
+        }
+    }
+
+    fn render_loading(&mut self, services: &mut EngineServices) {
+        // Darker overlay on game world (showing transition)
+        let overlay = Quad::new(
+            services.camera.get_position().x - 400.0,
+            services.camera.get_position().y - 300.0,
+            800.0,
+            600.0,
+            Vec4::new(0.0, 0.0, 0.0, 0.8),
+        );
+        services.renderer.draw_quad(&overlay);
+
+        // Different style loading bar - smaller and positioned differently
+        let bar_bg = Quad::new(
+            services.camera.get_position().x - 150.0,
+            services.camera.get_position().y - 15.0,
+            300.0,
+            30.0,
+            Vec4::new(0.1, 0.3, 0.1, 0.9),
+        );
+        services.renderer.draw_quad(&bar_bg);
+
+        // Green loading bar for area transitions
+        let area_progress = self.loading_timer.min(1.0);
+        let bar_fill = Quad::new(
+            services.camera.get_position().x - 150.0,
+            services.camera.get_position().y - 15.0,
+            300.0 * area_progress,
+            30.0,
+            Vec4::new(0.2, 0.8, 0.2, 1.0),
+        );
+        services.renderer.draw_quad(&bar_fill);
+
+        // Area loading text
+        if let Some(text) = &self.text {
+            let mut t = text.clone();
+            t.set_scale(1.2);
+            t.set_color(Vec4::new(0.8, 1.0, 0.8, 1.0));
+            t.draw_text_world(
+                services.renderer,
+                Vec2::new(
+                    services.camera.get_position().x - 100.0,
+                    services.camera.get_position().y + 40.0,
+                ),
+                &format!("Loading Area {}...", 1),
+            );
+
+            // Progress percentage
+            t.set_scale(0.8);
+            t.set_color(Vec4::new(0.6, 0.8, 0.6, 1.0));
+            let percent = (self.loading_timer * 100.0) as i32;
+            t.draw_text_world(
+                services.renderer,
+                Vec2::new(
+                    services.camera.get_position().x - 20.0,
+                    services.camera.get_position().y - 50.0,
+                ),
+                &format!("{}%", percent),
+            );
+        }
+
+        // Optional: Show some asteroid silhouettes fading in/out for area transition effect
+        let fade_alpha = (area_progress * 0.3).sin().abs();
+        for i in 0..3 {
+            let angle = (area_progress * 2.0 + i as f32) * std::f32::consts::PI;
+            let radius = 60.0 + i as f32 * 20.0;
+            let pos = Vec2::new(
+                services.camera.get_position().x + angle.cos() * radius,
+                services.camera.get_position().y + angle.sin() * radius,
+            );
+
+            let preview_asteroid = Circle::new(
+                pos.x,
+                pos.y,
+                15.0 + i as f32 * 5.0,
+                Vec4::new(0.4, 0.4, 0.6, fade_alpha),
+            );
+            services.renderer.draw_circle(&preview_asteroid);
+        }
+    }
 }
 
 /// Implement the Game aspect for the TestGame
@@ -243,7 +377,7 @@ impl Game for TestGame {
         }
 
         // Load font texture once
-        services.renderer.load_texture("font", "assets/font.png");
+        _ = services.renderer.load_texture("font", "assets/font.png");
 
         // Create a text renderer: 16x16 atlas, 8x8 glyphs (adjust to your atlas)
         self.text = Some(crate::engine::TextRenderer::new("font", 16.0, 16.0, 16, 6));
@@ -326,7 +460,7 @@ impl Game for TestGame {
         println!("Game initialized!");
         println!("Window size: {}x{}", sapp::width(), sapp::height());
 
-        self.game_state = TestGameState::MainMenu;
+        self.game_state = TestGameState::InitialLoading;
     }
 
     fn update(&mut self, dt: f32, input: &InputManager, services: &mut EngineServices) {
@@ -339,6 +473,12 @@ impl Game for TestGame {
 
         // Handle game state transitions
         match self.game_state {
+            TestGameState::InitialLoading => {
+                self.loading_timer += dt;
+                if self.loading_timer >= self.loading_duration {
+                    self.game_state = TestGameState::MainMenu;
+                }
+            }
             TestGameState::MainMenu => {
                 services.update_particles(dt);
 
@@ -632,7 +772,10 @@ impl Game for TestGame {
                 }
             }
             TestGameState::Loading => {
-                // Handle loading/transition logic
+                self.loading_timer += dt * 0.5;
+                if self.loading_timer >= self.loading_duration {
+                    self.game_state = TestGameState::Playing;
+                }
             }
         }
     }
@@ -748,6 +891,12 @@ impl Game for TestGame {
                 );
                 services.renderer.draw_quad(&completed_text);
             }
+            TestGameState::InitialLoading => {
+                self.render_startup_loading(services);
+            }
+            TestGameState::Loading => {
+                self.render_loading(services);
+            }
             _ => {
                 // Handle other states as needed
             }
@@ -779,44 +928,5 @@ impl Game for TestGame {
             return Some(self.current_background);
         }
         None
-    }
-
-    fn engine_render_loading(
-        &mut self,
-        renderer: &mut Renderer,
-        progress: f32,
-        _camera: &mut Camera2D,
-    ) {
-        // Dark space background
-        let bg = Quad::new(-400.0, -300.0, 800.0, 600.0, Vec4::new(0.0, 0.0, 0.1, 1.0));
-        renderer.draw_quad(&bg);
-
-        // Loading bar background
-        let bar_bg = Quad::new(-200.0, -20.0, 400.0, 40.0, Vec4::new(0.2, 0.2, 0.3, 1.0));
-        renderer.draw_quad(&bar_bg);
-
-        // Loading bar fill (progress-based width)
-        let bar_fill = Quad::new(
-            -200.0,
-            -20.0,
-            400.0 * progress,
-            40.0,
-            Vec4::new(0.0, 0.6, 1.0, 1.0),
-        );
-        renderer.draw_quad(&bar_fill);
-
-        // Title
-        if let Some(text) = &self.text {
-            let mut t = text.clone();
-            t.set_scale(2.5);
-            t.set_color(Vec4::new(1.0, 0.8, 0.2, 1.0));
-            t.draw_text_world(renderer, Vec2::new(-120.0, 80.0), "ASTEROIDS");
-
-            // Loading percentage
-            t.set_scale(1.5);
-            t.set_color(Vec4::new(0.8, 0.8, 0.8, 1.0));
-            let percent = (progress * 100.0) as i32;
-            t.draw_text_world(renderer, Vec2::new(-40.0, -60.0), &format!("{}%", percent));
-        }
     }
 }
