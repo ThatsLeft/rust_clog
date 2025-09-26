@@ -34,17 +34,27 @@ impl Default for PhysicsMaterial {
 #[derive(Debug, Clone)]
 pub struct RigidBody {
     pub id: BodyId,
+
     pub body_type: BodyType,
+
     pub position: Vec2,
     pub velocity: Vec2,
     pub acceleration: Vec2,
+
     pub mass: f32,
+
     pub material: PhysicsMaterial,
     pub collider: Collider,
     pub gravity_field: Option<GravityField>,
     pub marked_for_deletion: bool,
 
+    pub rotation: f32,
+    pub angular_velocity: f32,
+    pub angular_acceleration: f32,
+    pub moment_of_inertia: f32,
+
     // Internal state
+    pub(crate) torque_accumulator: f32,
     pub(crate) force_accumulator: Vec2,
     pub(crate) is_sleeping: bool,
     pub(crate) sleep_timer: f32,
@@ -53,6 +63,8 @@ pub struct RigidBody {
 impl RigidBody {
     /// Create a new dynamic rigid body
     pub fn new_dynamic(id: BodyId, position: Vec2, collider: Collider, mass: f32) -> Self {
+        let moment_of_inertia = Self::calculate_moment_of_inertia(&collider, mass);
+
         Self {
             id,
             body_type: BodyType::Dynamic,
@@ -65,6 +77,12 @@ impl RigidBody {
             gravity_field: None,
             marked_for_deletion: false,
 
+            rotation: 0.0,
+            angular_velocity: 0.0,
+            angular_acceleration: 0.0,
+            moment_of_inertia,
+            torque_accumulator: 0.0,
+
             force_accumulator: Vec2::ZERO,
             is_sleeping: false,
             sleep_timer: 0.0,
@@ -73,6 +91,8 @@ impl RigidBody {
 
     /// Create a new static rigid body (walls, platforms)
     pub fn new_static(id: BodyId, position: Vec2, collider: Collider) -> Self {
+        let moment_of_inertia = Self::calculate_moment_of_inertia(&collider, f32::INFINITY);
+
         Self {
             id,
             body_type: BodyType::Static,
@@ -85,6 +105,12 @@ impl RigidBody {
             gravity_field: None,
             marked_for_deletion: false,
 
+            rotation: 0.0,
+            angular_velocity: 0.0,
+            angular_acceleration: 0.0,
+            moment_of_inertia,
+
+            torque_accumulator: 0.0,
             force_accumulator: Vec2::ZERO,
             is_sleeping: true, // Static bodies are always "sleeping"
             sleep_timer: 0.0,
@@ -93,6 +119,8 @@ impl RigidBody {
 
     /// Create a new kinematic rigid body (moving platforms)
     pub fn new_kinematic(id: BodyId, position: Vec2, collider: Collider) -> Self {
+        let moment_of_inertia = Self::calculate_moment_of_inertia(&collider, f32::INFINITY);
+
         Self {
             id,
             body_type: BodyType::Kinematic,
@@ -105,14 +133,51 @@ impl RigidBody {
             gravity_field: None,
             marked_for_deletion: false,
 
+            rotation: 0.0,
+            angular_velocity: 0.0,
+            angular_acceleration: 0.0,
+            moment_of_inertia,
+
+            torque_accumulator: 0.0,
             force_accumulator: Vec2::ZERO,
             is_sleeping: false,
             sleep_timer: 0.0,
         }
     }
 
+    fn calculate_moment_of_inertia(collider: &Collider, mass: f32) -> f32 {
+        use crate::engine::CollisionShape;
+
+        match &collider.shape {
+            CollisionShape::Circle { radius } => {
+                // Solid disk: I = (1/2) * m * r²
+                0.5 * mass * radius * radius
+            }
+            CollisionShape::Rectangle { width, height } => {
+                // Solid rectangle: I = (1/12) * m * (w² + h²)
+                mass * (width * width + height * height) / 12.0
+            }
+        }
+    }
+
     pub fn mark_for_deletion(&mut self) {
         self.marked_for_deletion = true;
+    }
+
+    /// Apply torque (rotational force)
+    pub fn apply_torque(&mut self, torque: f32) {
+        if self.body_type == BodyType::Dynamic {
+            self.torque_accumulator += torque;
+            self.wake_up();
+        }
+    }
+
+    /// Apply angular impulse (instant angular velocity change)
+    pub fn apply_angular_impulse(&mut self, impulse: f32) {
+        if self.body_type == BodyType::Dynamic {
+            self.angular_velocity += impulse / self.moment_of_inertia;
+            self.wake_up();
+        }
     }
 
     /// Apply a force to this body (will be integrated next physics step)

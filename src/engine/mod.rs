@@ -3,7 +3,6 @@ pub mod app;
 pub mod camera;
 pub mod collision;
 pub mod debug;
-pub mod egui_renderer;
 pub mod graphics;
 pub mod input;
 pub mod particle;
@@ -173,11 +172,10 @@ impl EngineServices<'_> {
             for body in self.physics.bodies() {
                 match body.collider.shape {
                     CollisionShape::Rectangle { width, height } => {
-                        let bottom_left_x = body.collider.position.x - width / 2.0;
-                        let bottom_left_y = body.collider.position.y - height / 2.0;
+                        // Use center positioning like the collider
                         let rect_outline = Quad::new(
-                            bottom_left_x,
-                            bottom_left_y,
+                            body.collider.position.x, // Center X
+                            body.collider.position.y, // Center Y
                             width,
                             height,
                             Vec4::new(1.0, 0.0, 0.0, 1.0),
@@ -186,6 +184,7 @@ impl EngineServices<'_> {
                         self.renderer.draw_quad(&rect_outline);
                     }
                     CollisionShape::Circle { radius } => {
+                        // This one is already correct - circles use center positioning
                         let circle_outline = Circle::new(
                             body.collider.position.x,
                             body.collider.position.y,

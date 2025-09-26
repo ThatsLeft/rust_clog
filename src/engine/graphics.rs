@@ -53,6 +53,9 @@ pub struct Circle {
     pub color: Vec4,
     pub segments: u32, // Number of triangles to approximate the circle
     pub outline_only: bool,
+    pub show_line: bool,
+    pub line_angle: f32,
+    pub line_color: Vec4,
 }
 
 impl Circle {
@@ -63,6 +66,9 @@ impl Circle {
             color,
             segments: 32, // Default to 32 segments for smooth appearance,
             outline_only: false,
+            show_line: false,
+            line_angle: 0.0,
+            line_color: color,
         }
     }
 
@@ -73,6 +79,17 @@ impl Circle {
 
     pub fn with_segments(mut self, segments: u32) -> Self {
         self.segments = segments.max(3); // Minimum 3 segments for a triangle
+        self
+    }
+
+    pub fn with_line(mut self, angle: f32) -> Self {
+        self.show_line = true;
+        self.line_angle = angle;
+        self
+    }
+
+    pub fn with_line_color(mut self, color: Vec4) -> Self {
+        self.line_color = color;
         self
     }
 }
@@ -838,10 +855,10 @@ impl Renderer {
         let start_vertex = self.vertices.len() as u16;
         let start_index = self.indices.len();
 
-        let x1 = quad.position.x;
-        let y1 = quad.position.y;
-        let x2 = quad.position.x + quad.size.x;
-        let y2 = quad.position.y + quad.size.y;
+        let x1 = quad.position.x - quad.size.x * 0.5;
+        let y1 = quad.position.y - quad.size.y * 0.5;
+        let x2 = quad.position.x + quad.size.x * 0.5;
+        let y2 = quad.position.y + quad.size.y * 0.5;
 
         let color = [quad.color.x, quad.color.y, quad.color.z, quad.color.w];
 
@@ -989,6 +1006,46 @@ impl Renderer {
                 PrimitiveType::Triangles,
             );
         }
+
+        if circle.show_line {
+            let start_vertex = self.vertices.len() as u16;
+            let start_index = self.indices.len();
+
+            // Calculate end point on the circle edge
+            let end_x = circle.center.x + circle.line_angle.cos() * circle.radius;
+            let end_y = circle.center.y + circle.line_angle.sin() * circle.radius;
+
+            let line_color = [
+                circle.line_color.x,
+                circle.line_color.y,
+                circle.line_color.z,
+                circle.line_color.w,
+            ];
+
+            // Add vertices for the line (center and edge point)
+            self.vertices.push(Vertex {
+                pos: [circle.center.x, circle.center.y],
+                texcoord: [0.5, 0.5],
+                color: line_color,
+            });
+
+            self.vertices.push(Vertex {
+                pos: [end_x, end_y],
+                texcoord: [0.5, 0.5],
+                color: line_color,
+            });
+
+            // Add indices for the line
+            self.indices
+                .extend_from_slice(&[start_vertex, start_vertex + 1]);
+
+            self.add_batch_with_type(
+                self.texture_manager.get_white_texture(),
+                start_index,
+                2,
+                PrimitiveType::Lines,
+            );
+        }
     }
 
     pub fn draw_sprite(&mut self, sprite: &Sprite) {
@@ -1088,13 +1145,14 @@ impl Renderer {
     }
 
     pub fn draw_particle(&mut self, particle: &Particle) {
-        let size = 4.0; // Small particle size
-        let alpha = particle.lifetime / particle.max_lifetime; // Fade out
+        let size = 4.0;
+        let alpha = particle.lifetime / particle.max_lifetime;
         let color = Vec4::new(particle.color.x, particle.color.y, particle.color.z, alpha);
 
+        // Use center positioning
         let quad = Quad::new(
-            particle.position.x - size * 0.5,
-            particle.position.y - size * 0.5,
+            particle.position.x, // Center X
+            particle.position.y, // Center Y
             size,
             size,
             color,

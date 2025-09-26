@@ -155,7 +155,7 @@ extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
 
     if let Some(debug_overlay) = &mut state.debug_overlay {
         debug_overlay.update_frame_stats(dt);
-        // debug_overlay.render();
+        debug_overlay.update(dt);
     }
 
     let mut services = EngineServices {
@@ -223,16 +223,8 @@ extern "C" fn event<T: Game>(event: *const sapp::Event, user_data: *mut ffi::c_v
         }
     }
 
-    let egui_handled = if let Some(debug_overlay) = &mut state.debug_overlay {
-        debug_overlay.handle_event(event)
-    } else {
-        false
-    };
-
-    if !egui_handled {
-        process_input_events(state, event);
-        state.game.handle_event(event);
-    }
+    process_input_events(state, event);
+    state.game.handle_event(event);
 }
 
 fn process_input_events<T: Game>(state: &mut AppState<T>, event: &sapp::Event) {

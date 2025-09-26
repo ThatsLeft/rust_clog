@@ -215,22 +215,22 @@ impl TestGame {
     }
 
     fn render_startup_loading(&mut self, services: &mut EngineServices) {
-        // Dark space background
-        let bg = Quad::new(-400.0, -300.0, 800.0, 600.0, Vec4::new(0.0, 0.0, 0.1, 1.0));
+        // Dark space background - already centered at (0,0)
+        let bg = Quad::new(0.0, 0.0, 800.0, 600.0, Vec4::new(0.0, 0.0, 0.1, 1.0));
         services.renderer.draw_quad(&bg);
 
-        // Calculate progress
         let progress = (self.loading_timer / self.loading_duration).min(1.0);
 
-        // Loading bar background
-        let bar_bg = Quad::new(-200.0, -20.0, 400.0, 40.0, Vec4::new(0.2, 0.2, 0.3, 1.0));
+        // Loading bar background - already centered
+        let bar_bg = Quad::new(0.0, -20.0, 400.0, 40.0, Vec4::new(0.2, 0.2, 0.3, 1.0));
         services.renderer.draw_quad(&bar_bg);
 
-        // Loading bar fill
+        // Loading bar fill - needs to be positioned differently for center positioning
+        let fill_width = 400.0 * progress;
         let bar_fill = Quad::new(
-            -200.0,
+            -200.0 + fill_width * 0.5, // Center the fill bar properly
             -20.0,
-            400.0 * progress,
+            fill_width,
             40.0,
             Vec4::new(0.0, 0.6, 1.0, 1.0),
         );
@@ -277,17 +277,17 @@ impl TestGame {
     fn render_loading(&mut self, services: &mut EngineServices) {
         // Darker overlay on game world (showing transition)
         let overlay = Quad::new(
-            services.camera.get_position().x - 400.0,
-            services.camera.get_position().y - 300.0,
+            services.camera.get_position().x, // Center on camera
+            services.camera.get_position().y, // Center on camera
             800.0,
             600.0,
             Vec4::new(0.0, 0.0, 0.0, 0.8),
         );
         services.renderer.draw_quad(&overlay);
 
-        // Different style loading bar - smaller and positioned differently
+        // Loading bar background - already centered
         let bar_bg = Quad::new(
-            services.camera.get_position().x - 150.0,
+            services.camera.get_position().x,
             services.camera.get_position().y - 15.0,
             300.0,
             30.0,
@@ -295,12 +295,13 @@ impl TestGame {
         );
         services.renderer.draw_quad(&bar_bg);
 
-        // Green loading bar for area transitions
+        // Loading bar fill - needs proper centering
         let area_progress = self.loading_timer.min(1.0);
+        let fill_width = 300.0 * area_progress;
         let bar_fill = Quad::new(
-            services.camera.get_position().x - 150.0,
+            services.camera.get_position().x - 150.0 + fill_width * 0.5, // Center the fill
             services.camera.get_position().y - 15.0,
-            300.0 * area_progress,
+            fill_width,
             30.0,
             Vec4::new(0.2, 0.8, 0.2, 1.0),
         );
@@ -382,7 +383,7 @@ impl Game for TestGame {
 
         // Load the texture once here.
         for texture_name in &self.texture_names {
-            let path = format!("assets/{}.png", texture_name);
+            let path = format!("games/test_game/assets/{}.png", texture_name);
             if let Ok(_) = services.renderer.load_texture(texture_name, &path) {
                 debug_print!("Loaded texture: {}", texture_name);
             } else {
@@ -391,7 +392,9 @@ impl Game for TestGame {
         }
 
         // Load font texture once
-        _ = services.renderer.load_texture("font", "assets/font.png");
+        _ = services
+            .renderer
+            .load_texture("font", "games/test_game/assets/font.png");
 
         // Create a text renderer: 16x16 atlas, 8x8 glyphs (adjust to your atlas)
         self.text = Some(crate::engine::TextRenderer::new("font", 16.0, 16.0, 16, 6));
@@ -509,9 +512,9 @@ impl Game for TestGame {
                 services.update_physics(dt);
                 services.update_particles(dt);
 
-                // Update animations
-                let mut sprites = vec![&mut self.player];
-                services.update_animations(dt, &mut sprites);
+                // // Update animations
+                // let mut sprites = vec![&mut self.player];
+                // services.update_animations(dt, &mut sprites);
 
                 if input.is_key_pressed(sapp::Keycode::P) {
                     self.game_state = TestGameState::Paused;
@@ -685,6 +688,8 @@ impl Game for TestGame {
                 services.remove_marked_bodies();
             }
             TestGameState::Paused => {
+                services.update_particles(dt);
+
                 if input.is_key_pressed(sapp::Keycode::P) {
                     self.game_state = TestGameState::Playing;
                 }
@@ -704,6 +709,7 @@ impl Game for TestGame {
             TestGameState::Completed => {
                 // Center camera for the celebration
                 services.camera.set_position(Vec2::ZERO);
+                services.update_particles(dt);
 
                 // Start sequence once
                 if !self.completed_fx_started {
@@ -802,16 +808,15 @@ impl Game for TestGame {
         match self.game_state {
             TestGameState::MainMenu => {
                 // Render main menu
-                let menu_bg =
-                    Quad::new(-400.0, -300.0, 800.0, 600.0, Vec4::new(0.1, 0.1, 0.3, 0.9));
+                let menu_bg = Quad::new(0.0, 0.0, 800.0, 600.0, Vec4::new(0.1, 0.1, 0.3, 0.9));
                 services.renderer.draw_quad(&menu_bg);
 
-                let title_box =
-                    Quad::new(-150.0, 100.0, 300.0, 80.0, Vec4::new(0.8, 0.8, 0.0, 1.0));
+                // Title box - already centered
+                let title_box = Quad::new(0.0, 100.0, 300.0, 80.0, Vec4::new(0.8, 0.8, 0.0, 1.0));
                 services.renderer.draw_quad(&title_box);
 
-                let start_button =
-                    Quad::new(-100.0, 0.0, 200.0, 50.0, Vec4::new(0.0, 0.8, 0.0, 1.0));
+                // Start button - already centered
+                let start_button = Quad::new(0.0, 0.0, 200.0, 50.0, Vec4::new(0.0, 0.8, 0.0, 1.0));
                 services.renderer.draw_quad(&start_button);
 
                 if let Some(text) = &self.text {
@@ -829,8 +834,8 @@ impl Game for TestGame {
                 //draw window bounds
                 let world_size = self.world_max - self.world_min;
                 let border = Quad::new(
-                    self.world_min.x,
-                    self.world_min.y,
+                    (self.world_min.x + self.world_max.x) * 0.5, // Center X
+                    (self.world_min.y + self.world_max.y) * 0.5, // Center Y
                     world_size.x,
                     world_size.y,
                     Vec4::new(0.1, 0.1, 0.3, 0.9),
@@ -862,24 +867,27 @@ impl Game for TestGame {
                 services.render_physics_debug();
             }
             TestGameState::Paused => {
+                services.render_particles();
+
                 // Render game in background + pause overlay
                 for astroid in self.asteroids.values() {
                     services.renderer.draw_circle(astroid);
                 }
                 services.renderer.draw_sprite(&self.player);
 
-                // Pause overlay
+                // Pause overlay - center on camera
                 let pause_overlay = Quad::new(
-                    services.camera.get_position().x - 400.0,
-                    services.camera.get_position().y - 300.0,
+                    services.camera.get_position().x,
+                    services.camera.get_position().y,
                     800.0,
                     600.0,
                     Vec4::new(0.0, 0.0, 0.0, 0.5),
                 );
                 services.renderer.draw_quad(&pause_overlay);
 
+                // Pause text box - already centered
                 let pause_text = Quad::new(
-                    services.camera.get_position().x - 100.0,
+                    services.camera.get_position().x,
                     services.camera.get_position().y,
                     200.0,
                     50.0,
@@ -888,18 +896,21 @@ impl Game for TestGame {
                 services.renderer.draw_quad(&pause_text);
             }
             TestGameState::Completed => {
-                // Pause overlay
+                services.render_particles();
+
+                // Completed overlay - center on camera
                 let completed_overlay = Quad::new(
-                    services.camera.get_position().x - 400.0,
-                    services.camera.get_position().y - 300.0,
+                    services.camera.get_position().x,
+                    services.camera.get_position().y,
                     800.0,
                     600.0,
                     Vec4::new(0.0, 0.0, 0.0, 0.5),
                 );
                 services.renderer.draw_quad(&completed_overlay);
 
+                // Completed text box - already centered
                 let completed_text = Quad::new(
-                    services.camera.get_position().x - 100.0,
+                    services.camera.get_position().x,
                     services.camera.get_position().y,
                     200.0,
                     50.0,

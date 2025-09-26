@@ -1,7 +1,7 @@
 use engine::App;
 use rusclog::engine::{self, toggle_collision_debug, toggle_debug_text};
 
-use crate::physic_game::PhysicsGame;
+use crate::physics_game::PhysicsGame;
 
 pub mod physics_game;
 
