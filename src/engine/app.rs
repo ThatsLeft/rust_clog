@@ -24,7 +24,6 @@ struct AppState<T: Game> {
     particle_systems: HashMap<String, ParticleSystem>,
     physics_world: PhysicsWorld,
     debug_overlay: Option<DebugOverlay>,
-    frame_start_time: Option<Instant>,
     actual_work_time: f32,
 }
 
@@ -54,7 +53,6 @@ impl<T: Game> App<T> {
             particle_systems: HashMap::new(),
             physics_world: PhysicsWorld::new(),
             debug_overlay: None,
-            frame_start_time: None,
             actual_work_time: 0.0,
         });
 

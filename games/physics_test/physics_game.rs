@@ -4,7 +4,6 @@ use rand::Rng;
 use rusclog::{
     debug_print,
     engine::{
-        check_collision,
         rigid_body::{BodyId, RigidBody},
         world_bounds::{BoundsBehavior, WorldBounds},
         EngineServices, TextRenderer,
