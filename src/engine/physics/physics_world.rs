@@ -4,6 +4,7 @@ use crate::engine::{
     collision::{check_collision, check_collision_with_point},
     gravity::GravityField,
     rigid_body::{BodyId, BodyType, RigidBody},
+    world_bounds::{BoundsBehavior, BoundsEvent, WorldBounds},
 };
 
 #[derive(Debug, Clone)]
@@ -20,6 +21,10 @@ pub struct PhysicsWorld {
     next_body_id: u32,
     global_gravity: Vec2,
     collision_events: Vec<CollisionEvent>,
+
+    world_bounds: Option<WorldBounds>,
+    bounds_behavior: BoundsBehavior,
+    bounds_events: Vec<BoundsEvent>,
 
     // Performance settings
     sleep_enabled: bool,
@@ -41,6 +46,10 @@ impl PhysicsWorld {
             global_gravity: Vec2::ZERO,
             collision_events: Vec::new(),
 
+            world_bounds: None,
+            bounds_behavior: BoundsBehavior::Events,
+            bounds_events: Vec::new(),
+
             sleep_enabled: true,
             substeps: 1,
         }
@@ -54,6 +63,15 @@ impl PhysicsWorld {
         self.collision_events.clear();
     }
 
+    /// Get bounds events (like collision events)
+    pub fn get_bounds_events(&self) -> &[BoundsEvent] {
+        &self.bounds_events
+    }
+
+    pub fn clear_bounds_events(&mut self) {
+        self.bounds_events.clear();
+    }
+
     /// Configure gravity for the world
     pub fn set_global_gravity(&mut self, gravity: Vec2) {
         self.global_gravity = gravity;
@@ -64,6 +82,17 @@ impl PhysicsWorld {
                 body.wake_up();
             }
         }
+    }
+
+    /// Configure world bounds and behavior
+    pub fn set_world_bounds(&mut self, bounds: Option<WorldBounds>, behavior: BoundsBehavior) {
+        self.world_bounds = bounds;
+        self.bounds_behavior = behavior;
+    }
+
+    /// Update bounds (for dynamic world sizing)
+    pub fn update_world_bounds(&mut self, bounds: WorldBounds) {
+        self.world_bounds = Some(bounds);
     }
 
     /// Add a body to the physics world
@@ -84,6 +113,11 @@ impl PhysicsWorld {
         } else {
             None
         }
+    }
+
+    /// Remove a body from the physics world
+    pub fn clear_bodies(&mut self) {
+        self.bodies.clear();
     }
 
     pub fn remove_marked_bodies(&mut self) -> Vec<RigidBody> {
@@ -218,8 +252,14 @@ impl PhysicsWorld {
             }
         }
 
+        // Add separation forces for overlapping bodies
+        self.separate_overlapping_bodies();
+
         // Check for collisions and resolve them
         self.resolve_collisions();
+
+        // Handle world bounds - add this line
+        self.handle_world_bounds();
     }
 
     /// Set the number of physics substeps (higher = more accurate but slower)
@@ -604,6 +644,256 @@ impl PhysicsWorld {
             sleeping_bodies,
             total_kinetic_energy: total_energy,
         }
+    }
+
+    fn separate_overlapping_bodies(&mut self) {
+        const SEPARATION_FORCE_MULTIPLIER: f32 = 1000.0;
+
+        for i in 0..self.bodies.len() {
+            for j in (i + 1)..self.bodies.len() {
+                // Skip if both are static
+                if self.bodies[i].body_type == BodyType::Static
+                    && self.bodies[j].body_type == BodyType::Static
+                {
+                    continue;
+                }
+
+                let penetration =
+                    self.calculate_penetration(&self.bodies[i].collider, &self.bodies[j].collider);
+
+                // If significantly overlapping, apply separation force
+                if penetration > 1.0 {
+                    let direction =
+                        (self.bodies[j].position - self.bodies[i].position).normalize_or_zero();
+                    let separation_force = direction * penetration * SEPARATION_FORCE_MULTIPLIER;
+
+                    // Apply separation forces
+                    if self.bodies[i].body_type == BodyType::Dynamic {
+                        self.bodies[i].force_accumulator -= separation_force;
+                        self.bodies[i].wake_up();
+                    }
+                    if self.bodies[j].body_type == BodyType::Dynamic {
+                        self.bodies[j].force_accumulator += separation_force;
+                        self.bodies[j].wake_up();
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_world_bounds(&mut self) {
+        if let Some(bounds) = self.world_bounds.clone() {
+            self.bounds_events.clear();
+
+            for body in &mut self.bodies {
+                if body.body_type == BodyType::Static
+                    && !matches!(self.bounds_behavior, BoundsBehavior::Events)
+                {
+                    continue;
+                }
+
+                let behavior = body
+                    .bounds_behavior
+                    .as_ref()
+                    .unwrap_or(&self.bounds_behavior);
+
+                // Inline the bounds behavior logic instead of calling self.apply_bounds_behavior
+                let violations = Self::check_bounds_violations_static(body, &bounds);
+
+                if violations.is_empty() {
+                    continue;
+                }
+
+                match behavior {
+                    BoundsBehavior::Ignore => {}
+                    BoundsBehavior::Events => {
+                        for violation in violations {
+                            self.bounds_events.push(BoundsEvent {
+                                body_id: body.id,
+                                position: body.position,
+                                violation,
+                            });
+                        }
+                    }
+                    BoundsBehavior::Clamp { restitution } => {
+                        Self::clamp_to_bounds_static(body, &bounds, *restitution);
+                    }
+                    BoundsBehavior::Wrap => {
+                        Self::wrap_to_bounds_static(body, &bounds);
+                    }
+                    BoundsBehavior::Delete { safety_margin } => {
+                        if Self::is_beyond_safety_margin_static(body, &bounds, *safety_margin) {
+                            for violation in violations {
+                                self.bounds_events.push(BoundsEvent {
+                                    body_id: body.id,
+                                    position: body.position,
+                                    violation,
+                                });
+                            }
+
+                            body.mark_for_deletion();
+                        }
+                    }
+                    BoundsBehavior::PerBody => {
+                        // Should not reach here if properly implemented
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Static helper functions
+impl PhysicsWorld {
+    fn check_bounds_violations_static(
+        body: &RigidBody,
+        bounds: &WorldBounds,
+    ) -> Vec<crate::engine::world_bounds::BoundsViolation> {
+        let mut violations = Vec::new();
+
+        // Get body bounds (considering collider shape)
+        let (body_min, body_max) = Self::get_body_bounds_static(body);
+
+        // Check each boundary
+        if body_min.x < bounds.min.x {
+            violations.push(crate::engine::world_bounds::BoundsViolation::Left(
+                bounds.min.x - body_min.x,
+            ));
+        }
+        if body_max.x > bounds.max.x {
+            violations.push(crate::engine::world_bounds::BoundsViolation::Right(
+                body_max.x - bounds.max.x,
+            ));
+        }
+        if body_min.y < bounds.min.y {
+            violations.push(crate::engine::world_bounds::BoundsViolation::Bottom(
+                bounds.min.y - body_min.y,
+            ));
+        }
+        if body_max.y > bounds.max.y {
+            violations.push(crate::engine::world_bounds::BoundsViolation::Top(
+                body_max.y - bounds.max.y,
+            ));
+        }
+
+        violations
+    }
+
+    fn get_body_bounds_static(body: &RigidBody) -> (Vec2, Vec2) {
+        use crate::engine::CollisionShape;
+
+        match &body.collider.shape {
+            CollisionShape::Circle { radius } => {
+                let min = body.position - Vec2::splat(*radius);
+                let max = body.position + Vec2::splat(*radius);
+                (min, max)
+            }
+            CollisionShape::Rectangle { width, height } => {
+                let half_size = Vec2::new(*width * 0.5, *height * 0.5);
+                let min = body.position - half_size;
+                let max = body.position + half_size;
+                (min, max)
+            }
+        }
+    }
+
+    fn clamp_to_bounds_static(body: &mut RigidBody, bounds: &WorldBounds, restitution: f32) {
+        let (body_min, body_max) = Self::get_body_bounds_static(body);
+        let mut position_changed = false;
+        let mut velocity_damped = false;
+
+        // Clamp X axis
+        if body_min.x < bounds.min.x {
+            let penetration = bounds.min.x - body_min.x;
+            body.position.x += penetration;
+            position_changed = true;
+
+            if body.velocity.x < 0.0 {
+                body.velocity.x = -body.velocity.x * restitution;
+                velocity_damped = true;
+            }
+        } else if body_max.x > bounds.max.x {
+            let penetration = body_max.x - bounds.max.x;
+            body.position.x -= penetration;
+            position_changed = true;
+
+            if body.velocity.x > 0.0 {
+                body.velocity.x = -body.velocity.x * restitution;
+                velocity_damped = true;
+            }
+        }
+
+        // Clamp Y axis
+        if body_min.y < bounds.min.y {
+            let penetration = bounds.min.y - body_min.y;
+            body.position.y += penetration;
+            position_changed = true;
+
+            if body.velocity.y < 0.0 {
+                body.velocity.y = -body.velocity.y * restitution;
+                velocity_damped = true;
+            }
+        } else if body_max.y > bounds.max.y {
+            let penetration = body_max.y - bounds.max.y;
+            body.position.y -= penetration;
+            position_changed = true;
+
+            if body.velocity.y > 0.0 {
+                body.velocity.y = -body.velocity.y * restitution;
+                velocity_damped = true;
+            }
+        }
+
+        // Update collider position if body moved
+        if position_changed {
+            body.collider.position = body.position;
+        }
+
+        // Wake up body if it hit bounds
+        if velocity_damped && body.is_sleeping {
+            body.wake_up();
+        }
+    }
+
+    fn wrap_to_bounds_static(body: &mut RigidBody, bounds: &WorldBounds) {
+        let mut position_changed = false;
+
+        // Wrap X axis
+        if body.position.x < bounds.min.x {
+            body.position.x = bounds.max.x - (bounds.min.x - body.position.x);
+            position_changed = true;
+        } else if body.position.x > bounds.max.x {
+            body.position.x = bounds.min.x + (body.position.x - bounds.max.x);
+            position_changed = true;
+        }
+
+        // Wrap Y axis
+        if body.position.y < bounds.min.y {
+            body.position.y = bounds.max.y - (bounds.min.y - body.position.y);
+            position_changed = true;
+        } else if body.position.y > bounds.max.y {
+            body.position.y = bounds.min.y + (body.position.y - bounds.max.y);
+            position_changed = true;
+        }
+
+        // Update collider position if body moved
+        if position_changed {
+            body.collider.position = body.position;
+        }
+    }
+
+    fn is_beyond_safety_margin_static(
+        body: &RigidBody,
+        bounds: &WorldBounds,
+        safety_margin: f32,
+    ) -> bool {
+        let safety_min = bounds.min - Vec2::splat(safety_margin);
+        let safety_max = bounds.max + Vec2::splat(safety_margin);
+
+        body.position.x < safety_min.x
+            || body.position.x > safety_max.x
+            || body.position.y < safety_min.y
+            || body.position.y > safety_max.y
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::engine::{gravity::GravityField, Collider};
+use crate::engine::{gravity::GravityField, world_bounds::BoundsBehavior, Collider};
 use glam::Vec2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,6 +53,8 @@ pub struct RigidBody {
     pub angular_acceleration: f32,
     pub moment_of_inertia: f32,
 
+    pub bounds_behavior: Option<BoundsBehavior>,
+
     // Internal state
     pub(crate) torque_accumulator: f32,
     pub(crate) force_accumulator: Vec2,
@@ -81,8 +83,10 @@ impl RigidBody {
             angular_velocity: 0.0,
             angular_acceleration: 0.0,
             moment_of_inertia,
-            torque_accumulator: 0.0,
 
+            bounds_behavior: None,
+
+            torque_accumulator: 0.0,
             force_accumulator: Vec2::ZERO,
             is_sleeping: false,
             sleep_timer: 0.0,
@@ -109,6 +113,8 @@ impl RigidBody {
             angular_velocity: 0.0,
             angular_acceleration: 0.0,
             moment_of_inertia,
+
+            bounds_behavior: Some(BoundsBehavior::Ignore),
 
             torque_accumulator: 0.0,
             force_accumulator: Vec2::ZERO,
@@ -138,11 +144,18 @@ impl RigidBody {
             angular_acceleration: 0.0,
             moment_of_inertia,
 
+            bounds_behavior: None,
+
             torque_accumulator: 0.0,
             force_accumulator: Vec2::ZERO,
             is_sleeping: false,
             sleep_timer: 0.0,
         }
+    }
+
+    pub fn with_bounds_behavior(mut self, behavior: BoundsBehavior) -> Self {
+        self.bounds_behavior = Some(behavior);
+        self
     }
 
     fn calculate_moment_of_inertia(collider: &Collider, mass: f32) -> f32 {

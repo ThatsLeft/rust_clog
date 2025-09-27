@@ -1,16 +1,12 @@
-use crate::engine::{
-    Camera2D, Circle, Collider, Game, GameConfig, InputManager,
-    LoopType::{self},
-    ParticleSystem, Quad, Sprite, SpriteAnimations,
-};
+use crate::engine::{Circle, Collider, Game, GameConfig, InputManager, Quad};
 use glam::{Vec2, Vec4};
 use rand::Rng;
 use rusclog::{
     debug_print,
     engine::{
-        gravity::{GravityFalloff, GravityField},
-        physics_world::PhysicsWorld,
+        check_collision,
         rigid_body::{BodyId, RigidBody},
+        world_bounds::{BoundsBehavior, WorldBounds},
         EngineServices, TextRenderer,
     },
 };
@@ -83,6 +79,9 @@ impl PhysicsGame {
         let radius = rng.random_range(5.0..=75.0);
 
         let mass = 1200.0; //rng.random_range(500.0..=1200.0);
+
+        // Find a safe spawn position
+        // let safe_position = self.find_safe_spawn_position(radius, position, services);
 
         let circle = Circle::new(position.x, position.y, radius, color)
             .with_line(0.0)
@@ -207,6 +206,13 @@ impl Game for PhysicsGame {
         self.new_background = true;
         services.physics.set_global_gravity(Vec2::new(0.0, -685.0));
         services.physics.set_substeps(8);
+        services.physics.set_world_bounds(
+            Some(WorldBounds {
+                min: Vec2::new(-3000.0, -3000.0),
+                max: Vec2::new(3000.0, 3000.0),
+            }),
+            BoundsBehavior::Wrap,
+        );
 
         // Load font texture once
         _ = services
@@ -248,7 +254,7 @@ impl Game for PhysicsGame {
                     }
                 }
 
-                if input.is_mouse_button_pressed(sapp::Mousebutton::Left) {
+                if input.is_mouse_button_down(sapp::Mousebutton::Left) {
                     let mouse_pos = input.mouse_position();
                     // Convert screen coordinates to world coordinates
                     let world_pos = services.camera.screen_to_world(mouse_pos);
@@ -263,6 +269,13 @@ impl Game for PhysicsGame {
 
                 let collision_events = services.physics.get_collision_events();
                 debug_print!("Collisions detected {}", collision_events.len());
+
+                let bounds_event = services.physics.get_bounds_events();
+                for bound_event in bounds_event {
+                    if self.balls.contains_key(&bound_event.body_id) {
+                        self.balls.remove(&bound_event.body_id);
+                    }
+                }
 
                 self.hud_msg = Some(format!("Balls: {}", self.balls.len()));
                 self.hud_timer = 0.5;

@@ -1,8 +1,9 @@
 // src/engine/debug.rs
 
-use glam::Vec2;
 use sokol::{app as sapp, debugtext as sdtx};
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::engine::physics_world::PhysicsStats;
 
 pub struct DebugFlags {
     pub debug_text: AtomicBool,
@@ -82,12 +83,7 @@ impl DebugOverlay {
         }
     }
 
-    pub fn update_frame_stats(&mut self, dt: f32) {
-        // Compatibility method - does same as update
-        self.update(dt);
-    }
-
-    pub fn render(&mut self) {
+    pub fn render(&mut self, physics_stats: Option<&PhysicsStats>) {
         if !debug_flags().is_debug_panel_visible() {
             return;
         }
@@ -101,12 +97,39 @@ impl DebugOverlay {
         if !self.frame_times.is_empty() {
             let avg_frame_time =
                 self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
-            let fps = 1000.0 / avg_frame_time.max(0.001);
+            let avg_fps = 1000.0 / avg_frame_time.max(0.001);
+
+            // Current frame FPS (last frame time)
+            let current_frame_time = self.frame_times.last().unwrap_or(&16.67);
+            let current_fps = 1000.0 / current_frame_time.max(0.001);
+
+            // Min/Max FPS over the sample period
+            let min_frame_time = self
+                .frame_times
+                .iter()
+                .fold(f32::INFINITY, |a, &b| a.min(b));
+            let max_frame_time = self.frame_times.iter().fold(0.0f32, |a, &b| a.max(b));
+            let max_fps = 1000.0 / min_frame_time.max(0.001);
+            let min_fps = 1000.0 / max_frame_time.max(0.001);
 
             sdtx::puts("=== DEBUG PANEL ===\n");
-            sdtx::puts(&format!("FPS: {:.1}\n", fps));
+            sdtx::puts(&format!("FPS: {:.1} (avg: {:.1})\n", current_fps, avg_fps));
+            sdtx::puts(&format!("FPS Range: {:.1} - {:.1}\n", min_fps, max_fps));
             sdtx::puts(&format!("Frame: {:.2}ms\n", avg_frame_time));
             sdtx::puts(&format!("Window: {}x{}\n", sapp::width(), sapp::height()));
+
+            // Add physics information
+            if let Some(stats) = physics_stats {
+                sdtx::puts("\n=== PHYSICS ===\n");
+                sdtx::puts(&format!("Total Bodies: {}\n", stats.total_bodies));
+                sdtx::puts(&format!("Active Bodies: {}\n", stats.active_bodies));
+                sdtx::puts(&format!("Sleeping Bodies: {}\n", stats.sleeping_bodies));
+                sdtx::puts(&format!(
+                    "Kinetic Energy: {:.1}\n",
+                    stats.total_kinetic_energy
+                ));
+            }
+
             sdtx::puts("\n");
 
             if debug_flags().is_debug_text_enabled() {

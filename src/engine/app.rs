@@ -6,6 +6,7 @@ use crate::engine::{
 use sokol::{app as sapp, gfx as sg, glue as sglue};
 use std::collections::HashMap;
 use std::ffi::{self, CString};
+use std::time::Instant;
 
 pub struct App<T: Game> {
     game: T,
@@ -23,6 +24,8 @@ struct AppState<T: Game> {
     particle_systems: HashMap<String, ParticleSystem>,
     physics_world: PhysicsWorld,
     debug_overlay: Option<DebugOverlay>,
+    frame_start_time: Option<Instant>,
+    actual_work_time: f32,
 }
 
 impl<T: Game> App<T> {
@@ -51,6 +54,8 @@ impl<T: Game> App<T> {
             particle_systems: HashMap::new(),
             physics_world: PhysicsWorld::new(),
             debug_overlay: None,
+            frame_start_time: None,
+            actual_work_time: 0.0,
         });
 
         let user_data = Box::into_raw(state) as *mut ffi::c_void;
@@ -77,6 +82,7 @@ impl<T: Game> App<T> {
                 sokol_default: true,
                 ..Default::default()
             },
+            swap_interval: 0,
             ..Default::default()
         });
     }
@@ -151,11 +157,12 @@ extern "C" fn init<T: Game>(user_data: *mut ffi::c_void) {
 
 extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
     let state = unsafe { &mut *(user_data as *mut AppState<T>) };
+    // Start timing the actual work
+    let work_start = Instant::now();
     let dt = sapp::frame_duration() as f32;
 
     if let Some(debug_overlay) = &mut state.debug_overlay {
-        debug_overlay.update_frame_stats(dt);
-        debug_overlay.update(dt);
+        debug_overlay.update(state.actual_work_time);
     }
 
     let mut services = EngineServices {
@@ -184,12 +191,16 @@ extern "C" fn frame<T: Game>(user_data: *mut ffi::c_void) {
     state.game.render(&mut services);
     state.renderer.flush(&mut state.camera);
 
+    let physics_stats = state.physics_world.stats();
     if let Some(debug_overlay) = &mut state.debug_overlay {
-        debug_overlay.render();
+        debug_overlay.render(Some(&physics_stats));
     }
 
     sg::end_pass();
     sg::commit();
+
+    // Measure actual work time at the end
+    state.actual_work_time = work_start.elapsed().as_secs_f32();
 
     state.input.new_frame();
 }
