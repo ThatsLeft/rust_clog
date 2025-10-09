@@ -222,318 +222,562 @@ impl Renderer {
 
         // Create sampler for texture filtering
         self.sampler = sg::make_sampler(&sg::SamplerDesc {
-            min_filter: sg::Filter::Nearest, // or Nearest for pixel art
-            mag_filter: sg::Filter::Nearest, // or Nearest for pixel art
+            min_filter: sg::Filter::Nearest,
+            mag_filter: sg::Filter::Nearest,
             wrap_u: sg::Wrap::ClampToEdge,
             wrap_v: sg::Wrap::ClampToEdge,
             ..Default::default()
         });
 
-        let textured_vs_source = "
-cbuffer uniforms : register(b0) {
-    float4x4 mvp;
-};
+        // Platform-specific shader compilation
+        let (texture_shader, colored_shader) = if cfg!(target_os = "windows") {
+            // HLSL shaders for Windows/D3D11
+            let textured_vs_source = "
+    cbuffer uniforms : register(b0) {
+        float4x4 mvp;
+    };
 
-struct vs_in {
-    float2 position : POSITION;
-    float2 texcoord : TEXCOORD;
-    float4 color    : COLOR;
-};
+    struct vs_in {
+        float2 position : POSITION;
+        float2 texcoord : TEXCOORD;
+        float4 color    : COLOR;
+    };
 
-struct vs_out {
-    float4 position : SV_Position;
-    float2 texcoord : TEXCOORD;
-    float4 color    : COLOR;
-};
+    struct vs_out {
+        float4 position : SV_Position;
+        float2 texcoord : TEXCOORD;
+        float4 color    : COLOR;
+    };
 
-vs_out main(vs_in inp) {
-    vs_out outp;
-    outp.position = mul(mvp, float4(inp.position, 0.0, 1.0));
-    outp.texcoord = inp.texcoord;
-    outp.color = inp.color;
-    return outp;
-}
-\0";
+    vs_out main(vs_in inp) {
+        vs_out outp;
+        outp.position = mul(mvp, float4(inp.position, 0.0, 1.0));
+        outp.texcoord = inp.texcoord;
+        outp.color = inp.color;
+        return outp;
+    }
+    \0";
 
-        let textured_fs_source = "
-Texture2D tex : register(t0);
-SamplerState smp : register(s0);
+            let textured_fs_source = "
+    Texture2D tex : register(t0);
+    SamplerState smp : register(s0);
 
-struct ps_in {
-    float4 position : SV_Position;
-    float2 texcoord : TEXCOORD;
-    float4 color : COLOR;
-};
+    struct ps_in {
+        float4 position : SV_Position;
+        float2 texcoord : TEXCOORD;
+        float4 color : COLOR;
+    };
 
-float4 main(ps_in inp) : SV_Target0 {
-    float4 tex_color = tex.Sample(smp, inp.texcoord);
-    return tex_color * inp.color;
-}
-\0";
+    float4 main(ps_in inp) : SV_Target0 {
+        float4 tex_color = tex.Sample(smp, inp.texcoord);
+        return tex_color * inp.color;
+    }
+    \0";
 
-        let color_vs_source = "
-cbuffer uniforms : register(b0) {
-    float4x4 mvp;
-};
+            let color_vs_source = "
+    cbuffer uniforms : register(b0) {
+        float4x4 mvp;
+    };
 
-struct vs_in {
-    float2 position : POSITION;
-    float2 texcoord : TEXCOORD;
-    float4 color    : COLOR;
-};
+    struct vs_in {
+        float2 position : POSITION;
+        float2 texcoord : TEXCOORD;
+        float4 color    : COLOR;
+    };
 
-struct vs_out {
-    float4 position : SV_Position;
-    float4 color    : COLOR;
-};
+    struct vs_out {
+        float4 position : SV_Position;
+        float4 color    : COLOR;
+    };
 
-vs_out main(vs_in inp) {
-    vs_out outp;
-    outp.position = mul(mvp, float4(inp.position, 0.0, 1.0));
-    outp.color = inp.color;
-    return outp;
-}
-\0";
+    vs_out main(vs_in inp) {
+        vs_out outp;
+        outp.position = mul(mvp, float4(inp.position, 0.0, 1.0));
+        outp.color = inp.color;
+        return outp;
+    }
+    \0";
 
-        let color_fs_source = "
-Texture2D tex : register(t0);
-SamplerState smp : register(s0);
+            let color_fs_source = "
+    struct ps_in {
+        float4 position : SV_Position;
+        float4 color : COLOR;
+    };
 
-struct ps_in {
-    float4 position : SV_Position;
-    float4 color : COLOR;
-};
+    float4 main(ps_in inp) : SV_Target0 {
+        return inp.color;
+    }
+    \0";
 
-float4 main(ps_in inp) : SV_Target0 {
-    return inp.color;
-}
-\0";
-
-        let texture_shader = sg::make_shader(&sg::ShaderDesc {
-            vertex_func: sg::ShaderFunction {
-                source: textured_vs_source.as_ptr() as *const i8,
-                ..Default::default()
-            },
-            fragment_func: sg::ShaderFunction {
-                source: textured_fs_source.as_ptr() as *const i8,
-                ..Default::default()
-            },
-            attrs: [
-                sg::ShaderVertexAttr {
-                    hlsl_sem_name: "POSITION\0".as_ptr() as *const i8,
-                    hlsl_sem_index: 0,
+            let texture_shader = sg::make_shader(&sg::ShaderDesc {
+                vertex_func: sg::ShaderFunction {
+                    source: textured_vs_source.as_ptr() as *const i8,
                     ..Default::default()
                 },
-                sg::ShaderVertexAttr {
-                    hlsl_sem_name: "TEXCOORD\0".as_ptr() as *const i8,
-                    hlsl_sem_index: 0,
+                fragment_func: sg::ShaderFunction {
+                    source: textured_fs_source.as_ptr() as *const i8,
                     ..Default::default()
                 },
-                sg::ShaderVertexAttr {
-                    hlsl_sem_name: "COLOR\0".as_ptr() as *const i8,
-                    hlsl_sem_index: 0,
-                    ..Default::default()
-                },
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-            ],
-            uniform_blocks: [
-                sg::ShaderUniformBlock {
-                    stage: sg::ShaderStage::Vertex,
-                    size: mem::size_of::<Uniforms>() as u32,
-                    hlsl_register_b_n: 0, // matches "register(b0)" in shader
-                    ..Default::default()
-                },
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-            ],
-            // Define the texture view (image resource)
-            views: [
-                sg::ShaderView {
-                    texture: sg::ShaderTextureView {
-                        stage: sg::ShaderStage::Fragment,
-                        image_type: sg::ImageType::Dim2, // 2D texture
-                        sample_type: sg::ImageSampleType::Float,
-                        multisampled: false,
-                        hlsl_register_t_n: 0, // Maps to register(t0) in HLSL
-                        msl_texture_n: 0,
-                        wgsl_group1_binding_n: 0,
+                attrs: [
+                    sg::ShaderVertexAttr {
+                        hlsl_sem_name: "POSITION\0".as_ptr() as *const i8,
+                        hlsl_sem_index: 0,
+                        ..Default::default()
                     },
-                    storage_buffer: sg::ShaderStorageBufferView::default(),
-                    storage_image: sg::ShaderStorageImageView::default(),
-                },
-                // Fill remaining with defaults (28 total)
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-                sg::ShaderView::default(),
-            ],
-            // Define the sampler
-            samplers: [
-                sg::ShaderSampler {
-                    stage: sg::ShaderStage::Fragment,
-                    sampler_type: sg::SamplerType::Filtering,
-                    hlsl_register_s_n: 0, // Maps to register(s0) in HLSL
-                    ..Default::default()
-                },
-                // Fill remaining with defaults (16 total)
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-                sg::ShaderSampler::default(),
-            ],
-            // Link texture view and sampler together
-            texture_sampler_pairs: [
-                sg::ShaderTextureSamplerPair {
-                    stage: sg::ShaderStage::Fragment,
-                    view_slot: 0,
-                    sampler_slot: 0,
-                    glsl_name: std::ptr::null(),
-                },
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-                sg::ShaderTextureSamplerPair::default(),
-            ],
-            ..Default::default()
-        });
-
-        let colored_shader = sg::make_shader(&sg::ShaderDesc {
-            vertex_func: sg::ShaderFunction {
-                source: color_vs_source.as_ptr() as *const i8,
+                    sg::ShaderVertexAttr {
+                        hlsl_sem_name: "TEXCOORD\0".as_ptr() as *const i8,
+                        hlsl_sem_index: 0,
+                        ..Default::default()
+                    },
+                    sg::ShaderVertexAttr {
+                        hlsl_sem_name: "COLOR\0".as_ptr() as *const i8,
+                        hlsl_sem_index: 0,
+                        ..Default::default()
+                    },
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                ],
+                uniform_blocks: [
+                    sg::ShaderUniformBlock {
+                        stage: sg::ShaderStage::Vertex,
+                        size: mem::size_of::<Uniforms>() as u32,
+                        hlsl_register_b_n: 0,
+                        ..Default::default()
+                    },
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                ],
+                views: [
+                    sg::ShaderView {
+                        texture: sg::ShaderTextureView {
+                            stage: sg::ShaderStage::Fragment,
+                            image_type: sg::ImageType::Dim2,
+                            sample_type: sg::ImageSampleType::Float,
+                            multisampled: false,
+                            hlsl_register_t_n: 0,
+                            msl_texture_n: 0,
+                            wgsl_group1_binding_n: 0,
+                        },
+                        storage_buffer: sg::ShaderStorageBufferView::default(),
+                        storage_image: sg::ShaderStorageImageView::default(),
+                    },
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                ],
+                samplers: [
+                    sg::ShaderSampler {
+                        stage: sg::ShaderStage::Fragment,
+                        sampler_type: sg::SamplerType::Filtering,
+                        hlsl_register_s_n: 0,
+                        ..Default::default()
+                    },
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                ],
+                texture_sampler_pairs: [
+                    sg::ShaderTextureSamplerPair {
+                        stage: sg::ShaderStage::Fragment,
+                        view_slot: 0,
+                        sampler_slot: 0,
+                        glsl_name: std::ptr::null(),
+                    },
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                ],
                 ..Default::default()
-            },
-            fragment_func: sg::ShaderFunction {
-                source: color_fs_source.as_ptr() as *const i8,
-                ..Default::default()
-            },
-            attrs: [
-                sg::ShaderVertexAttr {
-                    hlsl_sem_name: "POSITION\0".as_ptr() as *const i8,
-                    hlsl_sem_index: 0,
-                    ..Default::default()
-                },
-                sg::ShaderVertexAttr {
-                    hlsl_sem_name: b"TEXCOORD\0".as_ptr() as *const i8,
-                    hlsl_sem_index: 0,
-                    ..Default::default()
-                },
-                sg::ShaderVertexAttr {
-                    hlsl_sem_name: "COLOR\0".as_ptr() as *const i8,
-                    hlsl_sem_index: 0,
-                    ..Default::default()
-                },
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-                sg::ShaderVertexAttr::default(),
-            ],
-            uniform_blocks: [
-                sg::ShaderUniformBlock {
-                    stage: sg::ShaderStage::Vertex,
-                    size: mem::size_of::<Uniforms>() as u32,
-                    hlsl_register_b_n: 0,
-                    ..Default::default()
-                },
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-                sg::ShaderUniformBlock::default(),
-            ],
-            ..Default::default()
-        });
+            });
 
-        // Vertex layout (same for both pipelines)
+            let colored_shader = sg::make_shader(&sg::ShaderDesc {
+                vertex_func: sg::ShaderFunction {
+                    source: color_vs_source.as_ptr() as *const i8,
+                    ..Default::default()
+                },
+                fragment_func: sg::ShaderFunction {
+                    source: color_fs_source.as_ptr() as *const i8,
+                    ..Default::default()
+                },
+                attrs: [
+                    sg::ShaderVertexAttr {
+                        hlsl_sem_name: "POSITION\0".as_ptr() as *const i8,
+                        hlsl_sem_index: 0,
+                        ..Default::default()
+                    },
+                    sg::ShaderVertexAttr {
+                        hlsl_sem_name: "TEXCOORD\0".as_ptr() as *const i8,
+                        hlsl_sem_index: 0,
+                        ..Default::default()
+                    },
+                    sg::ShaderVertexAttr {
+                        hlsl_sem_name: "COLOR\0".as_ptr() as *const i8,
+                        hlsl_sem_index: 0,
+                        ..Default::default()
+                    },
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                    sg::ShaderVertexAttr::default(),
+                ],
+                uniform_blocks: [
+                    sg::ShaderUniformBlock {
+                        stage: sg::ShaderStage::Vertex,
+                        size: mem::size_of::<Uniforms>() as u32,
+                        hlsl_register_b_n: 0,
+                        ..Default::default()
+                    },
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                ],
+                ..Default::default()
+            });
+
+            (texture_shader, colored_shader)
+        } else {
+            // GLSL shaders for Linux/macOS/OpenGL
+            let textured_vs_source = "
+    #version 330
+
+    uniform mat4 mvp;
+
+    layout(location = 0) in vec2 position;
+    layout(location = 1) in vec2 texcoord;
+    layout(location = 2) in vec4 color;
+
+    out vec2 uv;
+    out vec4 color0;
+
+    void main() {
+        gl_Position = mvp * vec4(position, 0.0, 1.0);
+        uv = texcoord;
+        color0 = color;
+    }
+    \0";
+
+            let textured_fs_source = "
+    #version 330
+
+    uniform sampler2D tex;
+
+    in vec2 uv;
+    in vec4 color0;
+
+    out vec4 frag_color;
+
+    void main() {
+        frag_color = texture(tex, uv) * color0;
+    }
+    \0";
+
+            let color_vs_source = "
+    #version 330
+
+    uniform mat4 mvp;
+
+    layout(location = 0) in vec2 position;
+    layout(location = 1) in vec2 texcoord;
+    layout(location = 2) in vec4 color;
+
+    out vec4 color0;
+
+    void main() {
+        gl_Position = mvp * vec4(position, 0.0, 1.0);
+        color0 = color;
+    }
+    \0";
+
+            let color_fs_source = "
+    #version 330
+
+    in vec4 color0;
+    out vec4 frag_color;
+
+    void main() {
+        frag_color = color0;
+    }
+    \0";
+
+            let texture_shader = sg::make_shader(&sg::ShaderDesc {
+                vertex_func: sg::ShaderFunction {
+                    source: textured_vs_source.as_ptr() as *const i8,
+                    ..Default::default()
+                },
+                fragment_func: sg::ShaderFunction {
+                    source: textured_fs_source.as_ptr() as *const i8,
+                    ..Default::default()
+                },
+                uniform_blocks: [
+                    sg::ShaderUniformBlock {
+                        stage: sg::ShaderStage::Vertex,
+                        size: mem::size_of::<Uniforms>() as u32,
+                        glsl_uniforms: [
+                            sg::GlslShaderUniform {
+                                glsl_name: "mvp\0".as_ptr() as *const i8,
+                                _type: sg::UniformType::Mat4,
+                                array_count: 1,
+                            },
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                        ],
+                        ..Default::default()
+                    },
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                ],
+                views: [
+                    sg::ShaderView {
+                        texture: sg::ShaderTextureView {
+                            stage: sg::ShaderStage::Fragment,
+                            image_type: sg::ImageType::Dim2,
+                            sample_type: sg::ImageSampleType::Float,
+                            multisampled: false,
+                            ..Default::default()
+                        },
+                        storage_buffer: sg::ShaderStorageBufferView::default(),
+                        storage_image: sg::ShaderStorageImageView::default(),
+                    },
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                    sg::ShaderView::default(),
+                ],
+                samplers: [
+                    sg::ShaderSampler {
+                        stage: sg::ShaderStage::Fragment,
+                        sampler_type: sg::SamplerType::Filtering,
+                        ..Default::default()
+                    },
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                    sg::ShaderSampler::default(),
+                ],
+                texture_sampler_pairs: [
+                    sg::ShaderTextureSamplerPair {
+                        stage: sg::ShaderStage::Fragment,
+                        view_slot: 0,
+                        sampler_slot: 0,
+                        glsl_name: "tex\0".as_ptr() as *const i8,
+                    },
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                    sg::ShaderTextureSamplerPair::default(),
+                ],
+                ..Default::default()
+            });
+
+            let colored_shader = sg::make_shader(&sg::ShaderDesc {
+                vertex_func: sg::ShaderFunction {
+                    source: color_vs_source.as_ptr() as *const i8,
+                    ..Default::default()
+                },
+                fragment_func: sg::ShaderFunction {
+                    source: color_fs_source.as_ptr() as *const i8,
+                    ..Default::default()
+                },
+                uniform_blocks: [
+                    sg::ShaderUniformBlock {
+                        stage: sg::ShaderStage::Vertex,
+                        size: mem::size_of::<Uniforms>() as u32,
+                        glsl_uniforms: [
+                            sg::GlslShaderUniform {
+                                glsl_name: "mvp\0".as_ptr() as *const i8,
+                                _type: sg::UniformType::Mat4,
+                                array_count: 1,
+                            },
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                            sg::GlslShaderUniform::default(),
+                        ],
+                        ..Default::default()
+                    },
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                    sg::ShaderUniformBlock::default(),
+                ],
+                ..Default::default()
+            });
+
+            (texture_shader, colored_shader)
+        };
+
+        // Vertex layout (same for all platforms)
         let vertex_layout = sg::VertexLayoutState {
             attrs: [
                 sg::VertexAttrState {
                     buffer_index: 0,
                     offset: 0,
                     format: sg::VertexFormat::Float2,
-                }, // position
+                },
                 sg::VertexAttrState {
                     buffer_index: 0,
                     offset: 8,
                     format: sg::VertexFormat::Float2,
-                }, // texcoord
+                },
                 sg::VertexAttrState {
                     buffer_index: 0,
                     offset: 16,
                     format: sg::VertexFormat::Float4,
-                }, // color
+                },
                 sg::VertexAttrState::default(),
                 sg::VertexAttrState::default(),
                 sg::VertexAttrState::default(),
@@ -564,7 +808,7 @@ float4 main(ps_in inp) : SV_Target0 {
             ],
         };
 
-        // Create pipeline
+        // Create pipelines
         self.textured_pipeline = sg::make_pipeline(&sg::PipelineDesc {
             shader: texture_shader,
             layout: vertex_layout,
@@ -626,10 +870,10 @@ float4 main(ps_in inp) : SV_Target0 {
         });
 
         self.line_pipeline = sg::make_pipeline(&sg::PipelineDesc {
-            shader: colored_shader, // Reuse the same colored shader
-            layout: vertex_layout,  // Same vertex layout
+            shader: colored_shader,
+            layout: vertex_layout,
             index_type: sg::IndexType::Uint16,
-            primitive_type: sg::PrimitiveType::Lines, // Only this changes
+            primitive_type: sg::PrimitiveType::Lines,
             cull_mode: sg::CullMode::None,
             depth: sg::DepthState {
                 write_enabled: false,
@@ -661,9 +905,8 @@ float4 main(ps_in inp) : SV_Target0 {
         let vbuf_size_bytes = initial_vtx_count * mem::size_of::<Vertex>();
         let ibuf_size_bytes = initial_idx_count * mem::size_of::<u16>();
 
-        // Create vertex buffer
         let vbuf = sg::make_buffer(&sg::BufferDesc {
-            size: vbuf_size_bytes, // Space for many vertices
+            size: vbuf_size_bytes,
             usage: sg::BufferUsage {
                 vertex_buffer: true,
                 stream_update: true,
@@ -672,7 +915,6 @@ float4 main(ps_in inp) : SV_Target0 {
             ..Default::default()
         });
 
-        // Create index buffer
         let ibuf = sg::make_buffer(&sg::BufferDesc {
             size: ibuf_size_bytes,
             usage: sg::BufferUsage {
