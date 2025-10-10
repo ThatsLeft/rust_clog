@@ -18,4 +18,5 @@ path = "src/lib.rs"
 members = [
     "games/test_game",
     "games/physics_test",
+    "games/ecosys",
 ]

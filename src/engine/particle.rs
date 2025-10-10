@@ -7,6 +7,19 @@ pub struct Particle {
     pub lifetime: f32,
     pub max_lifetime: f32,
     pub color: Vec4,
+    pub size: f32,
+}
+
+#[derive(Clone)]
+pub enum ParticleSizeSpec {
+    Fixed(f32),
+    Range { min: f32, max: f32 },
+}
+
+impl ParticleSizeSpec {
+    fn default() -> Self {
+        Self::Fixed(4.0) // Default 4 pixel particles
+    }
 }
 
 #[derive(Clone)]
@@ -80,6 +93,7 @@ pub struct ParticleSystem {
     total_time: f32,
     color_spec: ParticleColorSpec,
     velocity_spec: ParticleVelocitySpec,
+    size_spec: ParticleSizeSpec,
     global_accel: Vec2,
     drag: f32,
     lifetime: ParticleSystemLifetime,
@@ -102,6 +116,7 @@ impl ParticleSystem {
             emission_timer: 0.0,
             color_spec: ParticleColorSpec::default(),
             velocity_spec: ParticleVelocitySpec::default(),
+            size_spec: ParticleSizeSpec::default(),
             global_accel: Vec2::ZERO,
             drag: 0.0,
             lifetime: ParticleSystemLifetime::Infinite,
@@ -170,6 +185,24 @@ impl ParticleSystem {
     pub fn with_lifetime(mut self, lifetime: ParticleSystemLifetime) -> Self {
         self.lifetime = lifetime;
         self
+    }
+
+    pub fn with_size_fixed(mut self, size: f32) -> Self {
+        self.size_spec = ParticleSizeSpec::Fixed(size.max(0.1));
+        self
+    }
+
+    pub fn with_size_range(mut self, min: f32, max: f32) -> Self {
+        self.size_spec = ParticleSizeSpec::Range { min, max };
+        self
+    }
+
+    pub fn set_size_fixed(&mut self, size: f32) {
+        self.size_spec = ParticleSizeSpec::Fixed(size.max(0.1));
+    }
+
+    pub fn set_size_range(&mut self, min: f32, max: f32) {
+        self.size_spec = ParticleSizeSpec::Range { min, max };
     }
 
     pub fn set_color_fixed(mut self, color: Vec4) -> Self {
@@ -285,7 +318,23 @@ impl ParticleSystem {
             lifetime: lifetime,
             max_lifetime: self.particle_lifetime + 0.2,
             color: self.get_random_color(),
+            size: self.next_size(),
         });
+    }
+
+    fn next_size(&self) -> f32 {
+        let mut rng = rand::rng();
+        match &self.size_spec {
+            ParticleSizeSpec::Fixed(size) => *size,
+            ParticleSizeSpec::Range { min, max } => {
+                let (s0, s1) = if *min <= *max {
+                    (*min, *max)
+                } else {
+                    (*max, *min)
+                };
+                rng.random_range(s0..=s1).max(0.1)
+            }
+        }
     }
 
     fn get_random_color(&self) -> Vec4 {
